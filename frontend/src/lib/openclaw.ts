@@ -134,7 +134,39 @@ function buildDeviceAuthPayload(params: {
   ].join("|");
 }
 
-function extractText(message: unknown): string {
+function extractTextParts(value: { content?: unknown }): Array<{
+  text: string;
+  type?: string;
+}> {
+  if (!Array.isArray(value.content)) {
+    return [];
+  }
+
+  return value.content
+    .flatMap((item) => {
+      if (!item || typeof item !== "object") {
+        return [];
+      }
+
+      const part = item as {
+        text?: unknown;
+        type?: unknown;
+      };
+
+      if (typeof part.text !== "string") {
+        return [];
+      }
+
+      return [
+        {
+          text: part.text,
+          type: typeof part.type === "string" ? part.type : undefined,
+        },
+      ];
+    });
+}
+
+function extractDeltaText(message: unknown): string {
   if (!message || typeof message !== "object") {
     return "";
   }
@@ -152,32 +184,62 @@ function extractText(message: unknown): string {
     return value.content;
   }
 
-  if (!Array.isArray(value.content)) {
+  const parts = extractTextParts(value);
+  const textDelta = parts
+    .filter((part) => part.type === "text_delta")
+    .map((part) => part.text)
+    .join("");
+
+  if (textDelta) {
+    return textDelta;
+  }
+
+  if (parts.length === 0) {
     return "";
   }
 
-  return value.content
-    .map((item) => {
-      if (!item || typeof item !== "object") {
-        return "";
-      }
+  if (parts.length === 1) {
+    return parts[0].text;
+  }
 
-      const part = item as {
-        text?: unknown;
-        type?: unknown;
-      };
+  // Some providers send multiple running fragments in delta payloads; the newest one is last.
+  return parts[parts.length - 1].text;
+}
 
-      if (typeof part.text === "string") {
-        return part.text;
-      }
+function extractFinalText(message: unknown): string {
+  if (!message || typeof message !== "object") {
+    return "";
+  }
 
-      if (part.type === "text_delta" || part.type === "output_text") {
-        return typeof part.text === "string" ? part.text : "";
-      }
+  const value = message as {
+    text?: unknown;
+    content?: unknown;
+  };
 
-      return "";
-    })
+  if (typeof value.text === "string") {
+    return value.text;
+  }
+
+  if (typeof value.content === "string") {
+    return value.content;
+  }
+
+  const parts = extractTextParts(value);
+
+  if (parts.length === 0) {
+    return "";
+  }
+
+  const outputText = parts
+    .filter((part) => part.type === "output_text")
+    .map((part) => part.text)
     .join("");
+
+  if (outputText) {
+    return outputText;
+  }
+
+  return parts.map((part) => part.text).join("");
 }
 
 async function loadIdentity(identityPath: string): Promise<DeviceIdentity> {
@@ -528,7 +590,7 @@ async function connectAndStreamChat(
       }
 
       if (payload.state === "delta") {
-        const text = extractText(payload.message);
+        const text = extractDeltaText(payload.message);
 
         if (text) {
           deltaChunks += 1;
@@ -540,7 +602,7 @@ async function connectAndStreamChat(
       }
 
       if (payload.state === "final") {
-        const finalText = extractText(payload.message);
+        const finalText = extractFinalText(payload.message);
 
         logInfo("openclaw.gateway", "openclaw.chat.final", {
           requestId,
