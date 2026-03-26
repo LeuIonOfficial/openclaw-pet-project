@@ -975,10 +975,12 @@ export function ChatShell() {
                       {message.role === "user" ? "Operator" : activeAgent?.name ?? "Assistant"}
                     </p>
                     {message.role === "assistant" ? (
-                      message.content ? (
+                      message.status === "done" ? (
                         <AssistantMarkdown content={message.content} />
                       ) : (
-                        <p className="text-sm leading-7 sm:text-[15px]">Streaming...</p>
+                        <p className="whitespace-pre-wrap text-sm leading-7 sm:text-[15px]">
+                          {message.content || "Streaming..."}
+                        </p>
                       )
                     ) : (
                       <p className="whitespace-pre-wrap text-sm leading-7 sm:text-[15px]">
