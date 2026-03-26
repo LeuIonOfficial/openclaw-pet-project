@@ -1,0 +1,17 @@
+# Secrets
+.env
+
+# Node artifacts
+**/node_modules/
+**/.next/
+**/dist/
+
+# Local runtime data
+backend-data/
+openclaw-data/logs/
+openclaw-data/openclaw.json.bak*
+openclaw-data/update-check.json
+openclaw-data/canvas/
+
+# OS/editor
+.DS_Store
