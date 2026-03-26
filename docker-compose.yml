@@ -17,5 +17,10 @@ services:
     ports:
       - "3000:3000"
     env_file: .env
+    environment:
+      - OPENCLAW_GATEWAY_URL=ws://openclaw:18789
+      - OPENCLAW_IDENTITY_PATH=/app/openclaw/identity/device.json
+    volumes:
+      - ./openclaw-data:/app/openclaw:ro
     depends_on:
       - openclaw

@@ -9,6 +9,7 @@
 # Local runtime data
 backend-data/
 openclaw-data/canvas/
+openclaw-data/agents/
 openclaw-data/devices/
 openclaw-data/identity/
 openclaw-data/logs/
