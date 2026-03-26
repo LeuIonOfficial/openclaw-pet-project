@@ -1,6 +1,8 @@
 "use client";
 
 import { startTransition, useEffect, useMemo, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 type ConnectionState = {
   label: string;
@@ -143,6 +145,14 @@ function formatUpdatedAt(timestamp: number): string {
     hour: "2-digit",
     minute: "2-digit",
   }).format(timestamp);
+}
+
+function AssistantMarkdown({ content }: { content: string }) {
+  return (
+    <div className="text-sm leading-7 sm:text-[15px] [&_a]:text-amber-200 [&_a]:underline [&_blockquote]:mb-4 [&_blockquote]:border-l-2 [&_blockquote]:border-white/20 [&_blockquote]:pl-3 [&_code]:rounded-md [&_code]:bg-black/30 [&_code]:px-1.5 [&_code]:py-0.5 [&_ol]:mb-4 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-4 [&_p:last-child]:mb-0 [&_pre]:mb-4 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:bg-black/35 [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:mb-4 [&_ul]:list-disc [&_ul]:pl-5">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+    </div>
+  );
 }
 
 function isMessage(value: unknown): value is Message {
@@ -903,9 +913,17 @@ export function ChatShell() {
                   <p className="mb-2 font-mono text-[10px] uppercase tracking-[0.22em] opacity-70 sm:text-[11px]">
                     {message.role === "user" ? "Operator" : activeAgent?.name ?? "Assistant"}
                   </p>
-                  <p className="whitespace-pre-wrap text-sm leading-7 sm:text-[15px]">
-                    {message.content || "Streaming..."}
-                  </p>
+                  {message.role === "assistant" ? (
+                    message.content ? (
+                      <AssistantMarkdown content={message.content} />
+                    ) : (
+                      <p className="text-sm leading-7 sm:text-[15px]">Streaming...</p>
+                    )
+                  ) : (
+                    <p className="whitespace-pre-wrap text-sm leading-7 sm:text-[15px]">
+                      {message.content || "Streaming..."}
+                    </p>
+                  )}
                 </article>
               ))}
             </div>
