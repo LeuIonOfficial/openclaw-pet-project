@@ -50,14 +50,53 @@ type ChatPayload = {
   message?: unknown;
 };
 
+type ChatAttachmentInput = {
+  type?: string;
+  name?: string;
+  mimeType: string;
+  content: string;
+};
+
+type ToolPhase = "start" | "update" | "result";
+
+type GatewayAgentEventPayload = {
+  runId?: unknown;
+  stream?: unknown;
+  data?: unknown;
+};
+
+type ParsedToolEvent = {
+  phase: ToolPhase;
+  toolCallId: string;
+  name: string;
+  args?: unknown;
+  partialResult?: unknown;
+  result?: unknown;
+  meta?: string;
+  isError?: boolean;
+};
+
 export type ChatStreamEvent =
   | { type: "status"; stage: "connecting" | "connected" | "started"; runId?: string }
   | { type: "delta"; text: string }
+  | {
+      type: "tool";
+      phase: ToolPhase;
+      toolCallId: string;
+      name: string;
+      status: "running" | "completed" | "error";
+      args?: unknown;
+      partialResult?: unknown;
+      result?: unknown;
+      meta?: string;
+      isError?: boolean;
+    }
   | { type: "final"; text: string; stopReason?: string; usage?: unknown }
   | { type: "error"; message: string };
 
 type StreamChatParams = {
   message: string;
+  attachments?: ChatAttachmentInput[];
   sessionKey?: string;
   requestId?: string;
   signal: AbortSignal;
@@ -185,13 +224,11 @@ function extractDeltaText(message: unknown): string {
   }
 
   const parts = extractTextParts(value);
-  const textDelta = parts
-    .filter((part) => part.type === "text_delta")
-    .map((part) => part.text)
-    .join("");
+  const textDeltaParts = parts.filter((part) => part.type === "text_delta");
 
-  if (textDelta) {
-    return textDelta;
+  if (textDeltaParts.length) {
+    // Providers may resend all prior deltas in one event; newest delta is the last entry.
+    return textDeltaParts[textDeltaParts.length - 1]?.text ?? "";
   }
 
   if (parts.length === 0) {
@@ -240,6 +277,87 @@ function extractFinalText(message: unknown): string {
   }
 
   return parts.map((part) => part.text).join("");
+}
+
+function mergeDeltaSnapshot(previous: string, incoming: string): string {
+  if (!incoming) {
+    return previous;
+  }
+
+  if (!previous) {
+    return incoming;
+  }
+
+  if (incoming.startsWith(previous)) {
+    return incoming;
+  }
+
+  if (previous.startsWith(incoming)) {
+    return previous;
+  }
+
+  if (incoming.includes(previous)) {
+    return incoming;
+  }
+
+  if (previous.includes(incoming)) {
+    return previous;
+  }
+
+  const maxOverlap = Math.min(previous.length, incoming.length);
+
+  for (let size = maxOverlap; size > 0; size -= 1) {
+    if (previous.slice(-size) === incoming.slice(0, size)) {
+      return `${previous}${incoming.slice(size)}`;
+    }
+  }
+
+  return `${previous}${incoming}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function parseAgentToolEvent(
+  payload: unknown,
+  expectedRunId: string,
+): ParsedToolEvent | null {
+  if (!isRecord(payload)) {
+    return null;
+  }
+
+  const envelope = payload as GatewayAgentEventPayload;
+
+  if (typeof envelope.runId !== "string" || envelope.runId !== expectedRunId) {
+    return null;
+  }
+
+  if (envelope.stream !== "tool" || !isRecord(envelope.data)) {
+    return null;
+  }
+
+  const phase = envelope.data.phase;
+  const toolCallId = envelope.data.toolCallId;
+
+  if (
+    (phase !== "start" && phase !== "update" && phase !== "result") ||
+    typeof toolCallId !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    phase,
+    toolCallId,
+    name: typeof envelope.data.name === "string" ? envelope.data.name : "tool",
+    args: envelope.data.args,
+    partialResult: envelope.data.partialResult,
+    result: envelope.data.result,
+    meta: typeof envelope.data.meta === "string" ? envelope.data.meta : undefined,
+    isError:
+      typeof envelope.data.isError === "boolean" ? envelope.data.isError : undefined,
+  };
 }
 
 async function loadIdentity(identityPath: string): Promise<DeviceIdentity> {
@@ -324,20 +442,54 @@ async function connectAndStreamChat(
     gatewayUrl: config.url,
     hasSessionKey: Boolean(params.sessionKey),
     messageChars: params.message.length,
+    attachmentCount: params.attachments?.length ?? 0,
   });
 
   await new Promise<void>((resolve, reject) => {
     const ws = new WebSocket(config.url);
     const connectId = crypto.randomUUID();
+    const patchSessionId = crypto.randomUUID();
     const sendId = crypto.randomUUID();
     let resolvedSessionKey = params.sessionKey;
     let runId = "";
     let deltaChunks = 0;
     let deltaCharacters = 0;
+    let assistantSnapshot = "";
+    let chatSendDispatched = false;
+    let toolStarted = 0;
+    let toolCompleted = 0;
+    let toolFailed = 0;
+    let patchFallbackTimer: ReturnType<typeof setTimeout> | null = null;
     let settled = false;
+
+    const dispatchChatSend = () => {
+      if (!resolvedSessionKey || chatSendDispatched) {
+        return;
+      }
+
+      chatSendDispatched = true;
+
+      ws.send(
+        JSON.stringify({
+          type: "req",
+          id: sendId,
+          method: "chat.send",
+          params: {
+            sessionKey: resolvedSessionKey,
+            message: params.message,
+            attachments: params.attachments,
+            idempotencyKey: crypto.randomUUID(),
+          },
+        }),
+      );
+    };
 
     const cleanup = () => {
       clearTimeout(timeoutId);
+      if (patchFallbackTimer) {
+        clearTimeout(patchFallbackTimer);
+        patchFallbackTimer = null;
+      }
 
       if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
         ws.close();
@@ -413,9 +565,20 @@ async function connectAndStreamChat(
     };
 
     ws.onmessage = (event) => {
-      const frame = JSON.parse(String(event.data)) as
-        | GatewayResponseFrame
-        | GatewayEventFrame;
+      let frame: GatewayResponseFrame | GatewayEventFrame;
+
+      try {
+        frame = JSON.parse(String(event.data)) as
+          | GatewayResponseFrame
+          | GatewayEventFrame;
+      } catch (error) {
+        fail("OpenClaw frame parse failed.", {
+          state: "frame-parse",
+          message:
+            error instanceof Error ? error.message : "Failed to parse frame JSON.",
+        });
+        return;
+      }
 
       if (frame.type === "event" && frame.event === "connect.challenge") {
         const nonce =
@@ -539,15 +702,56 @@ async function connectAndStreamChat(
         ws.send(
           JSON.stringify({
             type: "req",
-            id: sendId,
-            method: "chat.send",
+            id: patchSessionId,
+            method: "sessions.patch",
             params: {
-              sessionKey: resolvedSessionKey,
-              message: params.message,
-              idempotencyKey: crypto.randomUUID(),
+              key: resolvedSessionKey,
+              verboseLevel: "full",
             },
           }),
         );
+        patchFallbackTimer = setTimeout(() => {
+          if (chatSendDispatched) {
+            return;
+          }
+
+          logWarn("openclaw.gateway", "openclaw.session.patch_verbose.timeout", {
+            requestId,
+            attempt,
+            sessionKey: resolvedSessionKey,
+            timeoutMs: 450,
+          });
+          dispatchChatSend();
+        }, 450);
+        return;
+      }
+
+      if (frame.type === "res" && frame.id === patchSessionId) {
+        if (patchFallbackTimer) {
+          clearTimeout(patchFallbackTimer);
+          patchFallbackTimer = null;
+        }
+
+        if (!frame.ok) {
+          logWarn("openclaw.gateway", "openclaw.session.patch_verbose.failed", {
+            requestId,
+            attempt,
+            runId: runId || undefined,
+            sessionKey: resolvedSessionKey,
+            errorCode: frame.error?.code,
+            detailCode: frame.error?.details?.code,
+            message: frame.error?.message ?? "Failed to patch verbose level.",
+          });
+        } else {
+          logInfo("openclaw.gateway", "openclaw.session.patch_verbose.applied", {
+            requestId,
+            attempt,
+            sessionKey: resolvedSessionKey,
+            verboseLevel: "full",
+          });
+        }
+
+        dispatchChatSend();
         return;
       }
 
@@ -579,6 +783,62 @@ async function connectAndStreamChat(
         return;
       }
 
+      if (frame.type === "event" && frame.event === "agent") {
+        const toolEvent = parseAgentToolEvent(frame.payload, runId);
+
+        if (!toolEvent) {
+          return;
+        }
+
+        let status: "running" | "completed" | "error";
+
+        if (toolEvent.phase === "result") {
+          status = toolEvent.isError ? "error" : "completed";
+        } else {
+          status = "running";
+        }
+
+        if (toolEvent.phase === "start") {
+          toolStarted += 1;
+          logInfo("openclaw.gateway", "openclaw.tool.start", {
+            requestId,
+            attempt,
+            runId: runId || undefined,
+            toolCallId: toolEvent.toolCallId,
+            toolName: toolEvent.name,
+          });
+        } else if (toolEvent.phase === "result") {
+          if (toolEvent.isError) {
+            toolFailed += 1;
+          } else {
+            toolCompleted += 1;
+          }
+
+          logInfo("openclaw.gateway", "openclaw.tool.result", {
+            requestId,
+            attempt,
+            runId: runId || undefined,
+            toolCallId: toolEvent.toolCallId,
+            toolName: toolEvent.name,
+            isError: toolEvent.isError ?? false,
+          });
+        }
+
+        void params.onEvent({
+          type: "tool",
+          phase: toolEvent.phase,
+          toolCallId: toolEvent.toolCallId,
+          name: toolEvent.name,
+          status,
+          args: toolEvent.args,
+          partialResult: toolEvent.partialResult,
+          result: toolEvent.result,
+          meta: toolEvent.meta,
+          isError: toolEvent.isError,
+        });
+        return;
+      }
+
       if (frame.type !== "event" || frame.event !== "chat") {
         return;
       }
@@ -593,16 +853,18 @@ async function connectAndStreamChat(
         const text = extractDeltaText(payload.message);
 
         if (text) {
+          assistantSnapshot = mergeDeltaSnapshot(assistantSnapshot, text);
           deltaChunks += 1;
           deltaCharacters += text.length;
-          void params.onEvent({ type: "delta", text });
+          void params.onEvent({ type: "delta", text: assistantSnapshot });
         }
 
         return;
       }
 
       if (payload.state === "final") {
-        const finalText = extractFinalText(payload.message);
+        const extractedFinalText = extractFinalText(payload.message);
+        const finalText = extractedFinalText || assistantSnapshot;
 
         logInfo("openclaw.gateway", "openclaw.chat.final", {
           requestId,
@@ -612,6 +874,9 @@ async function connectAndStreamChat(
           deltaChunks,
           deltaCharacters,
           finalCharacters: finalText.length,
+          toolStarted,
+          toolCompleted,
+          toolFailed,
           durationMs: Date.now() - startedAt,
         });
 

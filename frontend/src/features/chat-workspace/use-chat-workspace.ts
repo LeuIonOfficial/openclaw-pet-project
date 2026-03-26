@@ -17,7 +17,6 @@ import {
   createDefaultAgents,
   createThread,
   deriveTitleFromMessage,
-  mergeStreamText,
   normalizeStoredAgents,
   normalizeStoredThreads,
   parseJson,
@@ -28,11 +27,111 @@ import type {
   ChatStreamPayload,
   ChatThread,
   ConnectionState,
+  GatewayConfigPayload,
+  GatewayConfigResponse,
   HealthResponse,
   Message,
+  MessageAttachment,
+  ToolCallTrace,
 } from "./types";
 
+const MAX_ATTACHMENTS = 3;
+const MAX_ATTACHMENT_BYTES = 5_000_000;
+
 type AssistantMessageUpdater = (message: Message) => Message;
+
+function safeStringify(value: unknown): string | undefined {
+  if (value == null) {
+    return undefined;
+  }
+
+  if (typeof value === "string") {
+    return value.trim() || undefined;
+  }
+
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function normalizeToolOutput(payload: ChatStreamPayload): string | undefined {
+  if (payload.type !== "tool") {
+    return undefined;
+  }
+
+  if (payload.phase === "update") {
+    return safeStringify(payload.partialResult);
+  }
+
+  if (payload.phase === "result") {
+    return safeStringify(payload.result);
+  }
+
+  return undefined;
+}
+
+function upsertToolCallTrace(
+  traces: ToolCallTrace[] | undefined,
+  payload: Extract<ChatStreamPayload, { type: "tool" }>,
+): ToolCallTrace[] {
+  const current = traces ?? [];
+  const nextOutput = normalizeToolOutput(payload);
+  const nextArgs = safeStringify(payload.args);
+  const updatedAt = Date.now();
+  const existing = current.find((trace) => trace.id === payload.toolCallId);
+
+  if (!existing) {
+    return [
+      ...current,
+      {
+        id: payload.toolCallId,
+        name: payload.name,
+        status: payload.status,
+        args: nextArgs,
+        output: nextOutput,
+        meta: payload.meta,
+        updatedAt,
+      },
+    ];
+  }
+
+  return current.map((trace) =>
+    trace.id === payload.toolCallId
+      ? {
+          ...trace,
+          name: payload.name || trace.name,
+          status: payload.status,
+          args: nextArgs ?? trace.args,
+          output: nextOutput ?? trace.output,
+          meta: payload.meta ?? trace.meta,
+          updatedAt,
+        }
+      : trace,
+  );
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      if (typeof reader.result !== "string") {
+        reject(new Error(`Failed to read "${file.name}".`));
+        return;
+      }
+
+      resolve(reader.result);
+    };
+
+    reader.onerror = () => {
+      reject(new Error(`Failed to read "${file.name}".`));
+    };
+
+    reader.readAsDataURL(file);
+  });
+}
 
 function parseStreamPayload(rawEvent: string): ChatStreamPayload | null {
   const line = rawEvent
@@ -59,6 +158,18 @@ function parseStreamPayload(rawEvent: string): ChatStreamPayload | null {
     return payload as ChatStreamPayload;
   }
 
+  if (
+    payload.type === "tool" &&
+    (payload.phase === "start" || payload.phase === "update" || payload.phase === "result") &&
+    typeof payload.toolCallId === "string" &&
+    typeof payload.name === "string" &&
+    (payload.status === "running" ||
+      payload.status === "completed" ||
+      payload.status === "error")
+  ) {
+    return payload as ChatStreamPayload;
+  }
+
   if (payload.type === "final" && typeof payload.text === "string") {
     return payload as ChatStreamPayload;
   }
@@ -81,13 +192,22 @@ export type ChatWorkspaceController = {
   connectionState: ConnectionState;
   input: string;
   inputLength: number;
+  attachments: MessageAttachment[];
+  attachmentError: string;
   isSubmitting: boolean;
   isSidebarOpen: boolean;
   isCreatingAgent: boolean;
+  isConfigSaving: boolean;
   newAgentName: string;
   newAgentInstructions: string;
+  configDraft: GatewayConfigPayload;
+  configStatus: string;
   setSidebarOpen: (isOpen: boolean) => void;
   setInputValue: (value: string) => void;
+  setConfigModelPrimaryValue: (value: string) => void;
+  setConfigGatewayModeValue: (value: string) => void;
+  setConfigGatewayBindValue: (value: string) => void;
+  setConfigTokenEnvIdValue: (value: string) => void;
   setNewAgentNameValue: (value: string) => void;
   setNewAgentInstructionsValue: (value: string) => void;
   startCreateAgent: () => void;
@@ -95,6 +215,10 @@ export type ChatWorkspaceController = {
   createThreadForSelectedAgent: () => void;
   selectAgent: (agentId: string) => void;
   selectThread: (thread: ChatThread) => void;
+  clearAttachment: (attachmentId: string) => void;
+  clearComposerAttachments: () => void;
+  handleAttachmentFiles: (files: FileList | File[]) => Promise<void>;
+  handleConfigSubmit: () => Promise<void>;
   handleCreateAgent: (event: FormEvent<HTMLFormElement>) => void;
   handleSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>;
 };
@@ -107,11 +231,21 @@ export function useChatWorkspace(): ChatWorkspaceController {
   const [activeThreadId, setActiveThreadId] = useState("");
   const [selectedAgentId, setSelectedAgentId] = useState(AGENT_TEMPLATES[0].id);
   const [input, setInput] = useState("");
+  const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
+  const [attachmentError, setAttachmentError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isCreatingAgent, setIsCreatingAgent] = useState(false);
+  const [isConfigSaving, setIsConfigSaving] = useState(false);
   const [newAgentName, setNewAgentName] = useState("");
   const [newAgentInstructions, setNewAgentInstructions] = useState("");
+  const [configDraft, setConfigDraft] = useState<GatewayConfigPayload>({
+    modelPrimary: "anthropic/claude-sonnet-4-5",
+    gatewayMode: "remote",
+    gatewayBind: "lan",
+    tokenEnvId: "OPENCLAW_GATEWAY_TOKEN",
+  });
+  const [configStatus, setConfigStatus] = useState("");
   const [connectionState, setConnectionState] = useState(INITIAL_CONNECTION_STATE);
   const listRef = useRef<HTMLDivElement | null>(null);
 
@@ -179,6 +313,8 @@ export function useChatWorkspace(): ChatWorkspaceController {
       setActiveThreadId(next.id);
       setSelectedAgentId(agentId);
       setInput("");
+      setAttachments([]);
+      setAttachmentError("");
       setIsSidebarOpen(false);
     },
     [isSubmitting],
@@ -286,6 +422,28 @@ export function useChatWorkspace(): ChatWorkspaceController {
           tone: "bad",
         });
       });
+
+    void fetch("/api/config")
+      .then(async (response) => {
+        const payload = (await response.json()) as GatewayConfigResponse;
+
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Failed to load gateway config.");
+        }
+
+        if (!payload.config) {
+          return;
+        }
+
+        setConfigDraft(payload.config);
+      })
+      .catch((error) => {
+        setConfigStatus(
+          error instanceof Error
+            ? `Config load failed: ${error.message}`
+            : "Config load failed.",
+        );
+      });
   }, []);
 
   useEffect(() => {
@@ -317,8 +475,143 @@ export function useChatWorkspace(): ChatWorkspaceController {
   const selectThread = useCallback((thread: ChatThread) => {
     setActiveThreadId(thread.id);
     setSelectedAgentId(thread.agentId);
+    setAttachmentError("");
     setIsSidebarOpen(false);
   }, []);
+
+  const clearAttachment = useCallback((attachmentId: string) => {
+    setAttachments((current) =>
+      current.filter((attachment) => attachment.id !== attachmentId),
+    );
+  }, []);
+
+  const clearComposerAttachments = useCallback(() => {
+    setAttachments([]);
+    setAttachmentError("");
+  }, []);
+
+  const handleAttachmentFiles = useCallback(
+    async (files: FileList | File[]) => {
+      if (isSubmitting) {
+        return;
+      }
+
+      const selected = Array.from(files);
+
+      if (!selected.length) {
+        return;
+      }
+
+      const imageFiles = selected.filter((file) => file.type.startsWith("image/"));
+      const availableSlots = Math.max(0, MAX_ATTACHMENTS - attachments.length);
+
+      if (!imageFiles.length || availableSlots === 0) {
+        setAttachmentError(
+          availableSlots === 0
+            ? `You can attach up to ${MAX_ATTACHMENTS} images per message.`
+            : "Only image attachments are supported.",
+        );
+        return;
+      }
+
+      if (imageFiles.length !== selected.length || imageFiles.length > availableSlots) {
+        setAttachmentError(
+          `Attached ${Math.min(imageFiles.length, availableSlots)} image(s). Max ${MAX_ATTACHMENTS} per message.`,
+        );
+      } else {
+        setAttachmentError("");
+      }
+
+      const acceptedFiles = imageFiles.slice(0, availableSlots);
+      const resolvedAttachments: MessageAttachment[] = [];
+
+      for (const file of acceptedFiles) {
+        if (file.size > MAX_ATTACHMENT_BYTES) {
+          setAttachmentError(`"${file.name}" exceeds ${MAX_ATTACHMENT_BYTES} bytes.`);
+          continue;
+        }
+
+        try {
+          const dataUrl = await readFileAsDataUrl(file);
+
+          resolvedAttachments.push({
+            id: crypto.randomUUID(),
+            name: file.name,
+            mimeType: file.type || "application/octet-stream",
+            dataUrl,
+            size: file.size,
+          });
+        } catch (error) {
+          setAttachmentError(
+            error instanceof Error
+              ? error.message
+              : `Failed to read "${file.name}".`,
+          );
+        }
+      }
+
+      if (!resolvedAttachments.length) {
+        return;
+      }
+
+      setAttachments((current) => [...current, ...resolvedAttachments]);
+    },
+    [attachments.length, isSubmitting],
+  );
+
+  const handleConfigSubmit = useCallback(async () => {
+    if (isConfigSaving) {
+      return;
+    }
+
+    const modelPrimary = configDraft.modelPrimary.trim();
+    const gatewayMode = configDraft.gatewayMode.trim();
+    const gatewayBind = configDraft.gatewayBind.trim();
+    const tokenEnvId = configDraft.tokenEnvId.trim();
+
+    if (!modelPrimary || !gatewayMode || !gatewayBind || !tokenEnvId) {
+      setConfigStatus("Config fields cannot be empty.");
+      return;
+    }
+
+    setIsConfigSaving(true);
+    setConfigStatus("Saving gateway config...");
+
+    try {
+      const response = await fetch("/api/config", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          modelPrimary,
+          gatewayMode,
+          gatewayBind,
+          tokenEnvId,
+        }),
+      });
+      const payload = (await response.json()) as GatewayConfigResponse;
+
+      if (!response.ok || !payload.config) {
+        throw new Error(payload.error ?? "Failed to save gateway config.");
+      }
+
+      setConfigDraft(payload.config);
+      setConfigStatus(
+        payload.savedAt
+          ? `Config updated at ${new Date(payload.savedAt).toLocaleTimeString()}.`
+          : "Config updated.",
+      );
+    } catch (error) {
+      setConfigStatus(
+        error instanceof Error
+          ? `Config update failed: ${error.message}`
+          : "Config update failed.",
+      );
+    } finally {
+      setIsConfigSaving(false);
+    }
+  }, [configDraft, isConfigSaving]);
 
   const handleCreateAgent = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
@@ -351,9 +644,10 @@ export function useChatWorkspace(): ChatWorkspaceController {
       event.preventDefault();
 
       const message = input.trim();
+      const pendingAttachments = attachments;
       const targetThread = activeThread;
 
-      if (!message || isSubmitting || !targetThread) {
+      if ((!message && pendingAttachments.length === 0) || isSubmitting || !targetThread) {
         return;
       }
 
@@ -365,15 +659,24 @@ export function useChatWorkspace(): ChatWorkspaceController {
       }
 
       const targetThreadId = targetThread.id;
+      const attachmentSummary =
+        pendingAttachments.length === 0
+          ? ""
+          : pendingAttachments.length === 1
+            ? `[Image] ${pendingAttachments[0]?.name ?? "attachment"}`
+            : `[${pendingAttachments.length} images attached]`;
       const userMessage: Message = {
         id: crypto.randomUUID(),
         role: "user",
-        content: message,
+        content: message || attachmentSummary,
         status: "done",
+        attachments: pendingAttachments.length ? pendingAttachments : undefined,
       };
       const assistantMessageId = crypto.randomUUID();
 
       setInput("");
+      setAttachments([]);
+      setAttachmentError("");
       setIsSubmitting(true);
       setConnectionState({
         label: "Streaming response",
@@ -384,7 +687,9 @@ export function useChatWorkspace(): ChatWorkspaceController {
         ...thread,
         title:
           thread.messages.length === 0
-            ? deriveTitleFromMessage(message)
+            ? deriveTitleFromMessage(
+                message || pendingAttachments[0]?.name || "New chat",
+              )
             : thread.title,
         updatedAt: Date.now(),
         messages: [
@@ -407,6 +712,11 @@ export function useChatWorkspace(): ChatWorkspaceController {
           },
           body: JSON.stringify({
             message,
+            attachments: pendingAttachments.map((attachment) => ({
+              name: attachment.name,
+              mimeType: attachment.mimeType,
+              dataUrl: attachment.dataUrl,
+            })),
             sessionKey: targetThread.sessionKey,
             agentName: targetAgent.name,
             agentPrompt: targetAgent.instructions,
@@ -459,7 +769,21 @@ export function useChatWorkspace(): ChatWorkspaceController {
                   assistantMessageId,
                   (entry) => ({
                     ...entry,
-                    content: mergeStreamText(entry.content, payload.text),
+                    content: payload.text,
+                  }),
+                );
+              });
+              continue;
+            }
+
+            if (payload.type === "tool") {
+              startTransition(() => {
+                updateAssistantMessage(
+                  targetThreadId,
+                  assistantMessageId,
+                  (entry) => ({
+                    ...entry,
+                    toolCalls: upsertToolCallTrace(entry.toolCalls, payload),
                   }),
                 );
               });
@@ -528,6 +852,7 @@ export function useChatWorkspace(): ChatWorkspaceController {
     [
       activeThread,
       agents,
+      attachments,
       input,
       isSubmitting,
       selectedAgent,
@@ -558,6 +883,34 @@ export function useChatWorkspace(): ChatWorkspaceController {
     setInput(value);
   }, []);
 
+  const setConfigModelPrimaryValue = useCallback((value: string) => {
+    setConfigDraft((current) => ({
+      ...current,
+      modelPrimary: value,
+    }));
+  }, []);
+
+  const setConfigGatewayModeValue = useCallback((value: string) => {
+    setConfigDraft((current) => ({
+      ...current,
+      gatewayMode: value,
+    }));
+  }, []);
+
+  const setConfigGatewayBindValue = useCallback((value: string) => {
+    setConfigDraft((current) => ({
+      ...current,
+      gatewayBind: value,
+    }));
+  }, []);
+
+  const setConfigTokenEnvIdValue = useCallback((value: string) => {
+    setConfigDraft((current) => ({
+      ...current,
+      tokenEnvId: value,
+    }));
+  }, []);
+
   const setNewAgentNameValue = useCallback((value: string) => {
     setNewAgentName(value);
   }, []);
@@ -577,13 +930,22 @@ export function useChatWorkspace(): ChatWorkspaceController {
     connectionState,
     input,
     inputLength: input.trim().length,
+    attachments,
+    attachmentError,
     isSubmitting,
     isSidebarOpen,
     isCreatingAgent,
+    isConfigSaving,
     newAgentName,
     newAgentInstructions,
+    configDraft,
+    configStatus,
     setSidebarOpen,
     setInputValue,
+    setConfigModelPrimaryValue,
+    setConfigGatewayModeValue,
+    setConfigGatewayBindValue,
+    setConfigTokenEnvIdValue,
     setNewAgentNameValue,
     setNewAgentInstructionsValue,
     startCreateAgent,
@@ -591,6 +953,10 @@ export function useChatWorkspace(): ChatWorkspaceController {
     createThreadForSelectedAgent,
     selectAgent,
     selectThread,
+    clearAttachment,
+    clearComposerAttachments,
+    handleAttachmentFiles,
+    handleConfigSubmit,
     handleCreateAgent,
     handleSubmit,
   };

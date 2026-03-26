@@ -1,5 +1,11 @@
 import { AGENT_TEMPLATES } from "./constants";
-import type { AgentProfile, ChatThread, Message } from "./types";
+import type {
+  AgentProfile,
+  ChatThread,
+  Message,
+  MessageAttachment,
+  ToolCallTrace,
+} from "./types";
 
 export function createDefaultAgents(now = Date.now()): AgentProfile[] {
   return AGENT_TEMPLATES.map((template) => ({
@@ -69,6 +75,16 @@ export function getThreadPreview(thread: ChatThread): string {
   const normalized = last.content.replace(/\s+/g, " ").trim();
 
   if (!normalized) {
+    if (last.role === "user" && last.attachments?.length) {
+      return last.attachments.length > 1
+        ? `Sent ${last.attachments.length} attachments`
+        : "Sent an attachment";
+    }
+
+    if (last.role === "assistant" && last.toolCalls?.length) {
+      return "Used tools in this reply";
+    }
+
     return last.role === "assistant" ? "Streaming..." : "Empty message";
   }
 
@@ -128,18 +144,96 @@ export function parseJson(value: string | null): unknown {
   }
 }
 
-function isMessage(value: unknown): value is Message {
+function normalizeAttachment(value: unknown): MessageAttachment | null {
   if (!value || typeof value !== "object") {
-    return false;
+    return null;
+  }
+
+  const entry = value as Partial<MessageAttachment>;
+
+  if (
+    typeof entry.id !== "string" ||
+    typeof entry.name !== "string" ||
+    typeof entry.mimeType !== "string" ||
+    typeof entry.dataUrl !== "string" ||
+    typeof entry.size !== "number"
+  ) {
+    return null;
+  }
+
+  return {
+    id: entry.id,
+    name: entry.name,
+    mimeType: entry.mimeType,
+    dataUrl: entry.dataUrl,
+    size: entry.size,
+  };
+}
+
+function normalizeToolCall(value: unknown): ToolCallTrace | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const entry = value as Partial<ToolCallTrace>;
+
+  if (
+    typeof entry.id !== "string" ||
+    typeof entry.name !== "string" ||
+    (entry.status !== "running" &&
+      entry.status !== "completed" &&
+      entry.status !== "error") ||
+    typeof entry.updatedAt !== "number"
+  ) {
+    return null;
+  }
+
+  return {
+    id: entry.id,
+    name: entry.name,
+    status: entry.status,
+    args: typeof entry.args === "string" ? entry.args : undefined,
+    output: typeof entry.output === "string" ? entry.output : undefined,
+    meta: typeof entry.meta === "string" ? entry.meta : undefined,
+    updatedAt: entry.updatedAt,
+  };
+}
+
+function normalizeMessage(value: unknown): Message | null {
+  if (!value || typeof value !== "object") {
+    return null;
   }
 
   const item = value as Partial<Message>;
-  return (
-    typeof item.id === "string" &&
-    (item.role === "user" || item.role === "assistant") &&
-    typeof item.content === "string" &&
-    (item.status === "done" || item.status === "streaming" || item.status === "error")
-  );
+
+  if (
+    typeof item.id !== "string" ||
+    (item.role !== "user" && item.role !== "assistant") ||
+    typeof item.content !== "string" ||
+    (item.status !== "done" && item.status !== "streaming" && item.status !== "error")
+  ) {
+    return null;
+  }
+
+  const attachments = Array.isArray(item.attachments)
+    ? item.attachments
+        .map((attachment) => normalizeAttachment(attachment))
+        .filter((attachment): attachment is MessageAttachment => attachment !== null)
+    : undefined;
+  const toolCalls = Array.isArray(item.toolCalls)
+    ? item.toolCalls
+        .map((toolCall) => normalizeToolCall(toolCall))
+        .filter((toolCall): toolCall is ToolCallTrace => toolCall !== null)
+    : undefined;
+
+  return {
+    id: item.id,
+    role: item.role,
+    content: item.content,
+    status: item.status,
+    attachments: attachments?.length ? attachments : undefined,
+    toolCalls: toolCalls?.length ? toolCalls : undefined,
+  };
 }
 
 export function normalizeStoredAgents(value: unknown): AgentProfile[] {
@@ -227,7 +321,9 @@ export function normalizeStoredThreads(
         title: thread.title.trim() || "New chat",
         createdAt: typeof thread.createdAt === "number" ? thread.createdAt : Date.now(),
         updatedAt: typeof thread.updatedAt === "number" ? thread.updatedAt : Date.now(),
-        messages: thread.messages.filter(isMessage),
+        messages: thread.messages
+          .map((message) => normalizeMessage(message))
+          .filter((message): message is Message => message !== null),
       } satisfies ChatThread;
     })
     .filter((thread): thread is ChatThread => thread !== null);

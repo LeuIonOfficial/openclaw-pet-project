@@ -21,6 +21,6 @@ services:
       - OPENCLAW_GATEWAY_URL=ws://openclaw:18789
       - OPENCLAW_IDENTITY_PATH=/app/openclaw/identity/device.json
     volumes:
-      - ./openclaw-data:/app/openclaw:ro
+      - ./openclaw-data:/app/openclaw
     depends_on:
       - openclaw

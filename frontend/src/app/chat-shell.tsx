@@ -1,13 +1,127 @@
 "use client";
 
+import { useRef } from "react";
+
 import { AssistantMarkdown } from "@/features/chat-workspace/assistant-markdown";
 import {
   formatUpdatedAt,
   getThreadPreview,
 } from "@/features/chat-workspace/helpers";
+import type {
+  MessageAttachment,
+  ToolCallTrace,
+} from "@/features/chat-workspace/types";
 import { useChatWorkspace } from "@/features/chat-workspace/use-chat-workspace";
 
+function formatBytes(value: number): string {
+  if (value < 1_024) {
+    return `${value} B`;
+  }
+
+  if (value < 1_024 * 1_024) {
+    return `${Math.round(value / 1_024)} KB`;
+  }
+
+  return `${(value / (1_024 * 1_024)).toFixed(1)} MB`;
+}
+
+function ToolTraceCard({ trace }: { trace: ToolCallTrace }) {
+  return (
+    <div className="rounded-xl border border-white/12 bg-slate-900/70 p-3">
+      <div className="mb-1.5 flex flex-wrap items-center gap-2">
+        <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-slate-400">
+          Tool
+        </span>
+        <span className="text-xs font-semibold text-slate-100">{trace.name}</span>
+        <span
+          className={`rounded-full px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.16em] ${
+            trace.status === "completed"
+              ? "bg-emerald-400/15 text-emerald-200"
+              : trace.status === "error"
+                ? "bg-rose-400/15 text-rose-200"
+                : "bg-amber-300/20 text-amber-200"
+          }`}
+        >
+          {trace.status}
+        </span>
+      </div>
+      {trace.meta ? (
+        <p className="mb-2 text-xs text-slate-400">{trace.meta}</p>
+      ) : null}
+      {trace.args ? (
+        <details className="mb-2 rounded-lg border border-white/10 bg-black/20 p-2">
+          <summary className="cursor-pointer text-xs font-medium text-slate-300">
+            Parameters
+          </summary>
+          <pre className="mt-2 overflow-x-auto whitespace-pre-wrap font-mono text-[11px] text-slate-300">
+            {trace.args}
+          </pre>
+        </details>
+      ) : null}
+      {trace.output ? (
+        <details
+          className="rounded-lg border border-white/10 bg-black/20 p-2"
+          open={trace.status === "error"}
+        >
+          <summary className="cursor-pointer text-xs font-medium text-slate-300">
+            Output
+          </summary>
+          <pre className="mt-2 overflow-x-auto whitespace-pre-wrap font-mono text-[11px] text-slate-300">
+            {trace.output}
+          </pre>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+function AttachmentPreview({
+  attachments,
+  onRemove,
+}: {
+  attachments: MessageAttachment[];
+  onRemove?: (attachmentId: string) => void;
+}) {
+  if (attachments.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {attachments.map((attachment) => (
+        <div
+          key={attachment.id}
+          className="group relative overflow-hidden rounded-xl border border-white/15 bg-slate-900/75"
+        >
+          <img
+            src={attachment.dataUrl}
+            alt={attachment.name}
+            className="h-20 w-28 object-cover"
+          />
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-black/55 px-2 py-1">
+            <p className="line-clamp-1 text-[10px] text-white">{attachment.name}</p>
+            <p className="text-[9px] uppercase tracking-[0.12em] text-slate-200">
+              {formatBytes(attachment.size)}
+            </p>
+          </div>
+          {onRemove ? (
+            <button
+              type="button"
+              onClick={() => onRemove(attachment.id)}
+              className="absolute right-1 top-1 rounded-full bg-black/65 px-1.5 py-0.5 text-[10px] font-semibold text-white transition hover:bg-black/85"
+              aria-label={`Remove ${attachment.name}`}
+            >
+              x
+            </button>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function ChatShell() {
+  const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const {
     listRef,
     agents,
@@ -19,13 +133,22 @@ export function ChatShell() {
     connectionState,
     input,
     inputLength,
+    attachments,
+    attachmentError,
     isSubmitting,
     isSidebarOpen,
     isCreatingAgent,
+    isConfigSaving,
     newAgentName,
     newAgentInstructions,
+    configDraft,
+    configStatus,
     setSidebarOpen,
     setInputValue,
+    setConfigModelPrimaryValue,
+    setConfigGatewayModeValue,
+    setConfigGatewayBindValue,
+    setConfigTokenEnvIdValue,
     setNewAgentNameValue,
     setNewAgentInstructionsValue,
     startCreateAgent,
@@ -33,6 +156,10 @@ export function ChatShell() {
     createThreadForSelectedAgent,
     selectAgent,
     selectThread,
+    clearAttachment,
+    clearComposerAttachments,
+    handleAttachmentFiles,
+    handleConfigSubmit,
     handleCreateAgent,
     handleSubmit,
   } = useChatWorkspace();
@@ -195,6 +322,49 @@ export function ChatShell() {
                 </div>
               )}
             </div>
+
+            <div className="mt-4 space-y-2 rounded-xl border border-white/12 bg-white/5 p-3">
+              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-slate-400">
+                Gateway Config
+              </p>
+              <input
+                value={configDraft.modelPrimary}
+                onChange={(event) => setConfigModelPrimaryValue(event.target.value)}
+                placeholder="Model id"
+                className="h-9 w-full rounded-lg border border-white/15 bg-slate-950/85 px-3 text-xs text-slate-100 outline-none focus:border-amber-300/70"
+              />
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  value={configDraft.gatewayMode}
+                  onChange={(event) => setConfigGatewayModeValue(event.target.value)}
+                  placeholder="Mode"
+                  className="h-9 rounded-lg border border-white/15 bg-slate-950/85 px-3 text-xs text-slate-100 outline-none focus:border-amber-300/70"
+                />
+                <input
+                  value={configDraft.gatewayBind}
+                  onChange={(event) => setConfigGatewayBindValue(event.target.value)}
+                  placeholder="Bind"
+                  className="h-9 rounded-lg border border-white/15 bg-slate-950/85 px-3 text-xs text-slate-100 outline-none focus:border-amber-300/70"
+                />
+              </div>
+              <input
+                value={configDraft.tokenEnvId}
+                onChange={(event) => setConfigTokenEnvIdValue(event.target.value)}
+                placeholder="Token env id"
+                className="h-9 w-full rounded-lg border border-white/15 bg-slate-950/85 px-3 text-xs text-slate-100 outline-none focus:border-amber-300/70"
+              />
+              <button
+                type="button"
+                onClick={() => void handleConfigSubmit()}
+                disabled={isConfigSaving}
+                className="h-9 w-full rounded-lg bg-sky-300/90 text-xs font-semibold uppercase tracking-[0.16em] text-slate-950 transition hover:bg-sky-200 disabled:cursor-not-allowed disabled:bg-sky-100"
+              >
+                {isConfigSaving ? "Saving..." : "Save Config"}
+              </button>
+              {configStatus ? (
+                <p className="text-[11px] leading-5 text-slate-300">{configStatus}</p>
+              ) : null}
+            </div>
           </aside>
 
           <section className="relative flex min-h-0 min-w-0 flex-col">
@@ -262,17 +432,29 @@ export function ChatShell() {
                       {message.role === "user" ? "Operator" : activeAgent?.name ?? "Assistant"}
                     </p>
                     {message.role === "assistant" ? (
-                      message.status === "done" ? (
-                        <AssistantMarkdown content={message.content} />
-                      ) : (
+                      <div className="space-y-3">
+                        {message.status === "done" ? (
+                          <AssistantMarkdown content={message.content} />
+                        ) : (
+                          <p className="whitespace-pre-wrap text-sm leading-7 sm:text-[15px]">
+                            {message.content || "Streaming..."}
+                          </p>
+                        )}
+                        {message.toolCalls?.length ? (
+                          <div className="space-y-2 pt-1">
+                            {message.toolCalls.map((trace) => (
+                              <ToolTraceCard key={trace.id} trace={trace} />
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
                         <p className="whitespace-pre-wrap text-sm leading-7 sm:text-[15px]">
                           {message.content || "Streaming..."}
                         </p>
-                      )
-                    ) : (
-                      <p className="whitespace-pre-wrap text-sm leading-7 sm:text-[15px]">
-                        {message.content || "Streaming..."}
-                      </p>
+                        <AttachmentPreview attachments={message.attachments ?? []} />
+                      </div>
                     )}
                   </article>
                 ))}
@@ -283,25 +465,70 @@ export function ChatShell() {
               onSubmit={handleSubmit}
               className="border-t border-white/10 bg-slate-950/72 px-4 py-4 backdrop-blur sm:px-8 sm:py-5"
             >
-              <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 sm:flex-row sm:items-end">
-                <textarea
-                  value={input}
-                  onChange={(event) => setInputValue(event.target.value)}
-                  placeholder={`Message ${activeAgent?.name ?? "assistant"}...`}
-                  rows={3}
-                  className="min-h-[104px] flex-1 resize-none rounded-2xl border border-white/15 bg-slate-950/85 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-amber-300/70 focus:ring-2 focus:ring-amber-300/25"
+              <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
+                <input
+                  ref={attachmentInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={(event) => {
+                    if (event.currentTarget.files) {
+                      void handleAttachmentFiles(event.currentTarget.files);
+                    }
+                    event.currentTarget.value = "";
+                  }}
                 />
-                <div className="flex items-center justify-between gap-2 sm:flex-col sm:items-end">
-                  <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-slate-500">
-                    {inputLength} chars
-                  </span>
-                  <button
-                    type="submit"
-                    disabled={isSubmitting || !activeThread}
-                    className="h-11 rounded-xl bg-amber-300 px-6 text-sm font-semibold text-slate-950 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:bg-amber-100"
-                  >
-                    {isSubmitting ? "Streaming..." : "Send"}
-                  </button>
+                <AttachmentPreview
+                  attachments={attachments}
+                  onRemove={clearAttachment}
+                />
+                {attachmentError ? (
+                  <p className="text-xs text-rose-200">{attachmentError}</p>
+                ) : null}
+
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                  <textarea
+                    value={input}
+                    onChange={(event) => setInputValue(event.target.value)}
+                    placeholder={`Message ${activeAgent?.name ?? "assistant"}...`}
+                    rows={3}
+                    className="min-h-[104px] flex-1 resize-none rounded-2xl border border-white/15 bg-slate-950/85 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-amber-300/70 focus:ring-2 focus:ring-amber-300/25"
+                  />
+                  <div className="flex items-center justify-between gap-2 sm:flex-col sm:items-end">
+                    <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                      {inputLength} chars • {attachments.length} img
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => attachmentInputRef.current?.click()}
+                        disabled={isSubmitting}
+                        className="h-11 rounded-xl border border-white/20 bg-white/6 px-4 text-xs font-semibold uppercase tracking-[0.14em] text-slate-200 transition hover:bg-white/12 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Attach
+                      </button>
+                      <button
+                        type="button"
+                        onClick={clearComposerAttachments}
+                        disabled={isSubmitting || attachments.length === 0}
+                        className="h-11 rounded-xl border border-white/20 px-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-300 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-55"
+                      >
+                        Clear
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={
+                          isSubmitting ||
+                          !activeThread ||
+                          (inputLength === 0 && attachments.length === 0)
+                        }
+                        className="h-11 rounded-xl bg-amber-300 px-6 text-sm font-semibold text-slate-950 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:bg-amber-100"
+                      >
+                        {isSubmitting ? "Streaming..." : "Send"}
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </form>
