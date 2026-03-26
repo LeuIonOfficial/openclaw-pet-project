@@ -151,17 +151,17 @@ function normalizeAttachment(value: unknown): MessageAttachment | null {
     typeof entry.id !== "string" ||
     typeof entry.name !== "string" ||
     typeof entry.mimeType !== "string" ||
-    typeof entry.dataUrl !== "string" ||
     typeof entry.size !== "number"
   ) {
     return null;
   }
 
+  // Do not hydrate base64 payloads from local storage into runtime message history.
+  // Keeping large image payloads in the browser state can crash the renderer.
   return {
     id: entry.id,
     name: entry.name,
     mimeType: entry.mimeType,
-    dataUrl: entry.dataUrl,
     size: entry.size,
   };
 }

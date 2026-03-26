@@ -7,7 +7,7 @@ export type MessageAttachment = {
   id: string;
   name: string;
   mimeType: string;
-  dataUrl: string;
+  dataUrl?: string;
   size: number;
 };
 

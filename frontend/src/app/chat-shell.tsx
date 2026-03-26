@@ -174,14 +174,20 @@ function AttachmentPreview({
           key={attachment.id}
           className="group relative overflow-hidden rounded-xl border border-white/15 bg-slate-900/75"
         >
-          <Image
-            src={attachment.dataUrl}
-            alt={attachment.name}
-            width={112}
-            height={80}
-            unoptimized
-            className="h-20 w-28 object-cover"
-          />
+          {attachment.dataUrl ? (
+            <Image
+              src={attachment.dataUrl}
+              alt={attachment.name}
+              width={112}
+              height={80}
+              unoptimized
+              className="h-20 w-28 object-cover"
+            />
+          ) : (
+            <div className="flex h-20 w-28 items-center justify-center bg-slate-800/90 px-2 text-center">
+              <p className="line-clamp-2 text-[10px] text-slate-200">Image sent</p>
+            </div>
+          )}
           <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-black/60 px-2 py-1">
             <p className="line-clamp-1 text-[10px] text-white">{attachment.name}</p>
             <p className="text-[9px] uppercase tracking-[0.12em] text-slate-200">

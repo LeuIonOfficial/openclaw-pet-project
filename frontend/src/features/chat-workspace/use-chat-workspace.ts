@@ -718,7 +718,14 @@ export function useChatWorkspace(): ChatWorkspaceController {
         role: "user",
         content: message || attachmentSummary,
         status: "done",
-        attachments: pendingAttachments.length ? pendingAttachments : undefined,
+        attachments: pendingAttachments.length
+          ? pendingAttachments.map((attachment) => ({
+              id: attachment.id,
+              name: attachment.name,
+              mimeType: attachment.mimeType,
+              size: attachment.size,
+            }))
+          : undefined,
       };
       const assistantMessageId = crypto.randomUUID();
 
