@@ -84,11 +84,18 @@ export type GatewayConfigPayload = {
   modelPrimary: string;
   gatewayMode: string;
   gatewayBind: string;
-  tokenEnvId: string;
 };
 
 export type GatewayConfigResponse = {
   config?: GatewayConfigPayload;
   savedAt?: string;
+  error?: string;
+};
+
+export type AgentBootstrapResponse = {
+  workspacePath?: string;
+  workspaceFolder?: string;
+  runtimeAgentKey?: string;
+  managedFiles?: string[];
   error?: string;
 };

@@ -4,7 +4,6 @@ export const configDraftSchema = z.object({
   modelPrimary: z.string().trim().min(1, "modelPrimary is required."),
   gatewayMode: z.string().trim().min(1, "gatewayMode is required."),
   gatewayBind: z.string().trim().min(1, "gatewayBind is required."),
-  tokenEnvId: z.string().trim().min(1, "tokenEnvId is required."),
 });
 
 export type ConfigDraft = z.infer<typeof configDraftSchema>;

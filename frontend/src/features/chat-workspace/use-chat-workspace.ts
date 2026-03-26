@@ -11,7 +11,7 @@ import {
   type RefObject,
 } from "react";
 
-import { AGENT_TEMPLATES, INITIAL_CONNECTION_STATE, STORAGE_KEYS } from "./constants";
+import { INITIAL_CONNECTION_STATE, STORAGE_KEYS } from "./constants";
 import {
   createAgent,
   createDefaultAgents,
@@ -23,6 +23,7 @@ import {
   sortThreadsByRecent,
 } from "./helpers";
 import type {
+  AgentBootstrapResponse,
   AgentProfile,
   ChatStreamPayload,
   ChatThread,
@@ -196,9 +197,11 @@ export type ChatWorkspaceController = {
   isSubmitting: boolean;
   isSidebarOpen: boolean;
   isCreatingAgent: boolean;
+  isCreatingAgentPending: boolean;
   isConfigSaving: boolean;
   newAgentName: string;
   newAgentInstructions: string;
+  createAgentStatus: string;
   configDraft: GatewayConfigPayload;
   configStatus: string;
   setSidebarOpen: (isOpen: boolean) => void;
@@ -206,7 +209,6 @@ export type ChatWorkspaceController = {
   setConfigModelPrimaryValue: (value: string) => void;
   setConfigGatewayModeValue: (value: string) => void;
   setConfigGatewayBindValue: (value: string) => void;
-  setConfigTokenEnvIdValue: (value: string) => void;
   setNewAgentNameValue: (value: string) => void;
   setNewAgentInstructionsValue: (value: string) => void;
   startCreateAgent: () => void;
@@ -217,8 +219,8 @@ export type ChatWorkspaceController = {
   clearAttachment: (attachmentId: string) => void;
   clearComposerAttachments: () => void;
   handleAttachmentFiles: (files: FileList | File[]) => Promise<void>;
-  handleConfigSubmit: () => Promise<void>;
-  handleCreateAgent: (event: FormEvent<HTMLFormElement>) => void;
+  handleConfigSubmit: (nextDraft?: GatewayConfigPayload) => Promise<void>;
+  handleCreateAgent: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   handleSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>;
 };
 
@@ -233,14 +235,15 @@ export function useChatWorkspace(): ChatWorkspaceController {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isCreatingAgent, setIsCreatingAgent] = useState(false);
+  const [isCreatingAgentPending, setIsCreatingAgentPending] = useState(false);
   const [isConfigSaving, setIsConfigSaving] = useState(false);
   const [newAgentName, setNewAgentName] = useState("");
   const [newAgentInstructions, setNewAgentInstructions] = useState("");
+  const [createAgentStatus, setCreateAgentStatus] = useState("");
   const [configDraft, setConfigDraft] = useState<GatewayConfigPayload>({
     modelPrimary: "anthropic/claude-sonnet-4-5",
     gatewayMode: "remote",
     gatewayBind: "lan",
-    tokenEnvId: "OPENCLAW_GATEWAY_TOKEN",
   });
   const [configStatus, setConfigStatus] = useState("");
   const [connectionState, setConnectionState] = useState(INITIAL_CONNECTION_STATE);
@@ -323,7 +326,22 @@ export function useChatWorkspace(): ChatWorkspaceController {
     const parsedAgents = normalizeStoredAgents(
       parseJson(localStorage.getItem(STORAGE_KEYS.agents)),
     );
-    const resolvedAgents = parsedAgents.length ? parsedAgents : defaultAgents;
+    const knownAgentIds = new Set(parsedAgents.map((agent) => agent.id));
+    const missingDefaultAgents = defaultAgents.filter(
+      (agent) => !knownAgentIds.has(agent.id),
+    );
+    const resolvedAgents = parsedAgents.length
+      ? [...parsedAgents, ...missingDefaultAgents]
+      : defaultAgents;
+
+    if (resolvedAgents.length === 0) {
+      setAgents([]);
+      setThreads([]);
+      setActiveThreadId("");
+      setSelectedAgentId("");
+      return;
+    }
+
     const validAgentIds = new Set(resolvedAgents.map((agent) => agent.id));
     const fallbackAgentId = resolvedAgents[0].id;
 
@@ -556,12 +574,13 @@ export function useChatWorkspace(): ChatWorkspaceController {
     [attachments.length, isSubmitting],
   );
 
-  const handleConfigSubmit = useCallback(async () => {
+  const handleConfigSubmit = useCallback(async (nextDraft?: GatewayConfigPayload) => {
     if (isConfigSaving) {
       return;
     }
 
-    const parsedDraft = configDraftSchema.safeParse(configDraft);
+    const draftToSave = nextDraft ?? configDraft;
+    const parsedDraft = configDraftSchema.safeParse(draftToSave);
 
     if (!parsedDraft.success) {
       setConfigStatus(parsedDraft.error.issues[0]?.message ?? "Invalid config fields.");
@@ -604,10 +623,10 @@ export function useChatWorkspace(): ChatWorkspaceController {
   }, [configDraft, isConfigSaving]);
 
   const handleCreateAgent = useCallback(
-    (event: FormEvent<HTMLFormElement>) => {
+    async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
 
-      if (isSubmitting) {
+      if (isSubmitting || isCreatingAgentPending) {
         return;
       }
 
@@ -620,13 +639,52 @@ export function useChatWorkspace(): ChatWorkspaceController {
 
       const agent = createAgent(name, instructions);
 
-      setAgents((current) => [agent, ...current]);
-      setNewAgentName("");
-      setNewAgentInstructions("");
-      setIsCreatingAgent(false);
-      createThreadForAgent(agent.id);
+      setIsCreatingAgentPending(true);
+      setCreateAgentStatus("Preparing OpenClaw workspace files...");
+
+      try {
+        const response = await fetch("/api/agents/bootstrap", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            agentId: agent.id,
+            name,
+            instructions,
+          }),
+        });
+        const payload = (await response.json()) as AgentBootstrapResponse;
+
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Failed to bootstrap agent workspace.");
+        }
+
+        setAgents((current) => [agent, ...current]);
+        setNewAgentName("");
+        setNewAgentInstructions("");
+        setIsCreatingAgent(false);
+        setCreateAgentStatus(
+          `Workspace ready (${payload.workspaceFolder ?? "folder created"}).`,
+        );
+        createThreadForAgent(agent.id);
+      } catch (error) {
+        setCreateAgentStatus(
+          error instanceof Error
+            ? `Agent setup failed: ${error.message}`
+            : "Agent setup failed.",
+        );
+      } finally {
+        setIsCreatingAgentPending(false);
+      }
     },
-    [createThreadForAgent, isSubmitting, newAgentInstructions, newAgentName],
+    [
+      createThreadForAgent,
+      isCreatingAgentPending,
+      isSubmitting,
+      newAgentInstructions,
+      newAgentName,
+    ],
   );
 
   const handleSubmit = useCallback(
@@ -852,17 +910,23 @@ export function useChatWorkspace(): ChatWorkspaceController {
   );
 
   const createThreadForSelectedAgent = useCallback(() => {
-    createThreadForAgent(selectedAgent?.id ?? AGENT_TEMPLATES[0].id);
+    if (!selectedAgent?.id) {
+      return;
+    }
+
+    createThreadForAgent(selectedAgent.id);
   }, [createThreadForAgent, selectedAgent?.id]);
 
   const startCreateAgent = useCallback(() => {
     setIsCreatingAgent(true);
+    setCreateAgentStatus("");
   }, []);
 
   const cancelCreateAgent = useCallback(() => {
     setIsCreatingAgent(false);
     setNewAgentName("");
     setNewAgentInstructions("");
+    setCreateAgentStatus("");
   }, []);
 
   const setSidebarOpen = useCallback((isOpen: boolean) => {
@@ -894,13 +958,6 @@ export function useChatWorkspace(): ChatWorkspaceController {
     }));
   }, []);
 
-  const setConfigTokenEnvIdValue = useCallback((value: string) => {
-    setConfigDraft((current) => ({
-      ...current,
-      tokenEnvId: value,
-    }));
-  }, []);
-
   const setNewAgentNameValue = useCallback((value: string) => {
     setNewAgentName(value);
   }, []);
@@ -925,9 +982,11 @@ export function useChatWorkspace(): ChatWorkspaceController {
     isSubmitting,
     isSidebarOpen,
     isCreatingAgent,
+    isCreatingAgentPending,
     isConfigSaving,
     newAgentName,
     newAgentInstructions,
+    createAgentStatus,
     configDraft,
     configStatus,
     setSidebarOpen,
@@ -935,7 +994,6 @@ export function useChatWorkspace(): ChatWorkspaceController {
     setConfigModelPrimaryValue,
     setConfigGatewayModeValue,
     setConfigGatewayBindValue,
-    setConfigTokenEnvIdValue,
     setNewAgentNameValue,
     setNewAgentInstructionsValue,
     startCreateAgent,

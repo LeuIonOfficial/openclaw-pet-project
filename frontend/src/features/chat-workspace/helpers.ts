@@ -6,6 +6,7 @@ import type {
   MessageAttachment,
   ToolCallTrace,
 } from "./types";
+import { buildSessionKey as buildRuntimeSessionKey } from "@/lib/agent-runtime";
 
 export function createDefaultAgents(now = Date.now()): AgentProfile[] {
   return AGENT_TEMPLATES.map((template) => ({
@@ -19,13 +20,8 @@ export function sortThreadsByRecent(threads: ChatThread[]): ChatThread[] {
   return [...threads].sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-function toSessionPart(value: string): string {
-  const normalized = value.toLowerCase().replace(/[^a-z0-9_-]/g, "_");
-  return normalized.slice(0, 40) || "agent";
-}
-
 export function buildSessionKey(agentId: string, threadId: string): string {
-  return `agent:${toSessionPart(agentId)}:chat:${toSessionPart(threadId)}`;
+  return buildRuntimeSessionKey(agentId, threadId);
 }
 
 export function createThread(agentId: string, now = Date.now()): ChatThread {

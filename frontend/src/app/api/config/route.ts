@@ -13,12 +13,12 @@ const DEFAULT_ALLOWED_ORIGINS = [
   "http://localhost:18789",
   "http://127.0.0.1:18789",
 ];
+const DEFAULT_GATEWAY_TOKEN_ENV_ID = "OPENCLAW_GATEWAY_TOKEN";
 
 type ConfigPayload = {
   modelPrimary: string;
   gatewayMode: string;
   gatewayBind: string;
-  tokenEnvId: string;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -46,15 +46,12 @@ function toConfigPayload(config: Record<string, unknown>): ConfigPayload {
   const defaults = isRecord(agents.defaults) ? agents.defaults : {};
   const model = isRecord(defaults.model) ? defaults.model : {};
   const gateway = isRecord(config.gateway) ? config.gateway : {};
-  const auth = isRecord(gateway.auth) ? gateway.auth : {};
-  const token = isRecord(auth.token) ? auth.token : {};
 
   return {
     modelPrimary:
       (asString(model.primary)?.trim() || "anthropic/claude-sonnet-4-5"),
     gatewayMode: asString(gateway.mode)?.trim() || "remote",
     gatewayBind: asString(gateway.bind)?.trim() || "lan",
-    tokenEnvId: asString(token.id)?.trim() || "OPENCLAW_GATEWAY_TOKEN",
   };
 }
 
@@ -75,6 +72,8 @@ function buildNextConfig(
   const currentControlUi = isRecord(currentGateway.controlUi)
     ? currentGateway.controlUi
     : {};
+  const currentAuth = isRecord(currentGateway.auth) ? currentGateway.auth : {};
+  const currentToken = isRecord(currentAuth.token) ? currentAuth.token : {};
   const allowedOrigins = readAllowedOrigins(currentControlUi.allowedOrigins);
   const commandConfig = isRecord(current.commands) ? current.commands : {};
 
@@ -121,12 +120,12 @@ function buildNextConfig(
           allowedOrigins.length > 0 ? allowedOrigins : DEFAULT_ALLOWED_ORIGINS,
       },
       auth: {
-        ...(isRecord(currentGateway.auth) ? currentGateway.auth : {}),
+        ...currentAuth,
         mode: "token",
         token: {
           source: "env",
           provider: "default",
-          id: draft.tokenEnvId,
+          id: asString(currentToken.id)?.trim() || DEFAULT_GATEWAY_TOKEN_ENV_ID,
         },
       },
     },
