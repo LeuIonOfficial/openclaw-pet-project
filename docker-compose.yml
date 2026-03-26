@@ -1,0 +1,21 @@
+services:
+  openclaw:
+    image: ghcr.io/openclaw/openclaw:latest
+    container_name: openclaw_gateway
+    ports:
+      - "18789:18789"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
+    volumes:
+      - ./openclaw-data:/home/node/.openclaw
+    restart: always
+
+  frontend:
+    build: ./frontend
+    container_name: openclaw_ui
+    ports:
+      - "3000:3000"
+    env_file: .env
+    depends_on:
+      - openclaw
