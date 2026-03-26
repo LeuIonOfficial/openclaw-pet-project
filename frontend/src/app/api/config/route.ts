@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import { logError, logInfo, logWarn } from "@/lib/logger";
+import { parseConfigDraft, type ConfigDraft } from "@/lib/schemas/config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,13 +13,6 @@ const DEFAULT_ALLOWED_ORIGINS = [
   "http://localhost:18789",
   "http://127.0.0.1:18789",
 ];
-
-type ConfigDraft = {
-  modelPrimary: string;
-  gatewayMode: string;
-  gatewayBind: string;
-  tokenEnvId: string;
-};
 
 type ConfigPayload = {
   modelPrimary: string;
@@ -45,30 +39,6 @@ function readAllowedOrigins(value: unknown): string[] {
   }
 
   return value.filter((entry): entry is string => typeof entry === "string");
-}
-
-function normalizeDraft(body: unknown): { draft?: ConfigDraft; error?: string } {
-  if (!isRecord(body)) {
-    return { error: "Invalid JSON payload." };
-  }
-
-  const modelPrimary = asString(body.modelPrimary)?.trim() ?? "";
-  const gatewayMode = asString(body.gatewayMode)?.trim() ?? "";
-  const gatewayBind = asString(body.gatewayBind)?.trim() ?? "";
-  const tokenEnvId = asString(body.tokenEnvId)?.trim() ?? "";
-
-  if (!modelPrimary || !gatewayMode || !gatewayBind || !tokenEnvId) {
-    return { error: "modelPrimary, gatewayMode, gatewayBind, tokenEnvId are required." };
-  }
-
-  return {
-    draft: {
-      modelPrimary,
-      gatewayMode,
-      gatewayBind,
-      tokenEnvId,
-    },
-  };
 }
 
 function toConfigPayload(config: Record<string, unknown>): ConfigPayload {
@@ -253,7 +223,7 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
-  const normalized = normalizeDraft(body);
+  const normalized = parseConfigDraft(body);
 
   if (normalized.error || !normalized.draft) {
     logWarn("config.api", "config.request.invalid_payload", {

@@ -34,9 +34,8 @@ import type {
   MessageAttachment,
   ToolCallTrace,
 } from "./types";
-
-const MAX_ATTACHMENTS = 3;
-const MAX_ATTACHMENT_BYTES = 5_000_000;
+import { MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES } from "@/lib/schemas/chat";
+import { configDraftSchema } from "@/lib/schemas/config";
 
 type AssistantMessageUpdater = (message: Message) => Message;
 
@@ -564,16 +563,14 @@ export function useChatWorkspace(): ChatWorkspaceController {
       return;
     }
 
-    const modelPrimary = configDraft.modelPrimary.trim();
-    const gatewayMode = configDraft.gatewayMode.trim();
-    const gatewayBind = configDraft.gatewayBind.trim();
-    const tokenEnvId = configDraft.tokenEnvId.trim();
+    const parsedDraft = configDraftSchema.safeParse(configDraft);
 
-    if (!modelPrimary || !gatewayMode || !gatewayBind || !tokenEnvId) {
-      setConfigStatus("Config fields cannot be empty.");
+    if (!parsedDraft.success) {
+      setConfigStatus(parsedDraft.error.issues[0]?.message ?? "Invalid config fields.");
       return;
     }
 
+    const validatedDraft = parsedDraft.data;
     setIsConfigSaving(true);
     setConfigStatus("Saving gateway config...");
 
@@ -583,12 +580,7 @@ export function useChatWorkspace(): ChatWorkspaceController {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          modelPrimary,
-          gatewayMode,
-          gatewayBind,
-          tokenEnvId,
-        }),
+        body: JSON.stringify(validatedDraft),
       });
       const payload = (await response.json()) as GatewayConfigResponse;
 
