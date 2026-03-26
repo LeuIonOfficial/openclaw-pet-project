@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 
-import { logError, logInfo } from "@/lib/logger";
-import { healthcheck } from "@/lib/openclaw";
+import { logError, logInfo } from "@/modules/app/logger";
+import { healthcheck } from "@openclaw/module";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

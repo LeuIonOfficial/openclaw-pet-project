@@ -3,8 +3,8 @@ import "server-only";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import { buildWorkspaceFolderName, normalizeRuntimeKey } from "@/lib/agent-runtime";
-import type { AgentBootstrapDraft } from "@/lib/schemas/agent-bootstrap";
+import { buildWorkspaceFolderName, normalizeRuntimeKey } from "../runtime/keys";
+import type { AgentWorkspaceDraft } from './types';
 
 const DEFAULT_OPENCLAW_ROOT = "/app/openclaw";
 const MANAGED_PROFILE_START = "<!-- OPENCLAW_APP_AGENT_PROFILE_START -->";
@@ -85,7 +85,7 @@ function upsertManagedSection(content: string, section: string): string {
   return `${normalized}\n\n${wrappedSection}\n`;
 }
 
-function buildManagedProfileSection(draft: AgentBootstrapDraft): string {
+function buildManagedProfileSection(draft: AgentWorkspaceDraft): string {
   const runtimeAgentKey = normalizeRuntimeKey(draft.agentId);
   const timestamp = new Date().toISOString();
 
@@ -119,7 +119,7 @@ async function seedWorkspaceState(workspacePath: string): Promise<void> {
   await fs.writeFile(statePath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
 }
 
-async function seedDailyMemory(workspacePath: string, draft: AgentBootstrapDraft): Promise<void> {
+async function seedDailyMemory(workspacePath: string, draft: AgentWorkspaceDraft): Promise<void> {
   const day = new Date().toISOString().slice(0, 10);
   const memoryPath = path.join(workspacePath, "memory", `${day}.md`);
   const existing = await readFileIfExists(memoryPath);
@@ -151,7 +151,7 @@ async function resolveTemplateContent(rootPath: string, fileName: string): Promi
   return fallbackTemplate(fileName);
 }
 
-export async function bootstrapAgentWorkspace(draft: AgentBootstrapDraft): Promise<{
+export async function bootstrapAgentWorkspace(draft: AgentWorkspaceDraft): Promise<{
   workspacePath: string;
   workspaceFolder: string;
   runtimeAgentKey: string;

@@ -2,9 +2,9 @@ import crypto from "node:crypto";
 
 import { NextRequest } from "next/server";
 
-import { logError, logInfo, logWarn } from "@/lib/logger";
-import { bootstrapAgentWorkspace } from "@/lib/agent-workspace";
-import { parseAgentBootstrapDraft } from "@/lib/schemas/agent-bootstrap";
+import { logError, logInfo, logWarn } from "@/modules/app/logger";
+import { bootstrapAgentWorkspace } from "@openclaw/module";
+import { parseAgentBootstrapDraft } from "@/modules/app/schemas/agent-bootstrap";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

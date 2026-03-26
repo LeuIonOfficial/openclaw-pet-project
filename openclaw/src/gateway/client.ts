@@ -2,7 +2,7 @@ import 'server-only';
 
 import { promises as fs } from 'node:fs';
 import crypto from 'node:crypto';
-import { logError, logInfo, logWarn } from '@/lib/logger';
+import { logError, logInfo, logWarn } from '../logger';
 
 const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
 const CONNECT_TIMEOUT_MS = 10_000;

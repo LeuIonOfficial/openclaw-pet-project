@@ -1,9 +1,9 @@
 import crypto from "node:crypto";
 import { NextRequest } from "next/server";
 
-import { logError, logInfo, logWarn } from "@/lib/logger";
-import { streamChat, type ChatStreamEvent } from "@/lib/openclaw";
-import { parseChatRequest } from "@/lib/schemas/chat";
+import { logError, logInfo, logWarn } from "@/modules/app/logger";
+import { streamChat, type ChatStreamEvent } from "@openclaw/module";
+import { parseChatRequest } from "@/modules/app/schemas/chat";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

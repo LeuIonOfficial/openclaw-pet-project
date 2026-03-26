@@ -18,8 +18,11 @@
         "name": "next"
       }
     ],
+    "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@openclaw/module": ["../openclaw/src/index.ts"],
+      "@openclaw/module/*": ["../openclaw/src/*"]
     }
   },
   "include": [
@@ -28,7 +31,8 @@
     "**/*.tsx",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
-    "**/*.mts"
+    "**/*.mts",
+    "../openclaw/src/**/*.ts"
   ],
   "exclude": ["node_modules"]
 }

@@ -6,7 +6,7 @@ import type {
   MessageAttachment,
   ToolCallTrace,
 } from "./types";
-import { buildSessionKey as buildRuntimeSessionKey } from "@/lib/agent-runtime";
+import { buildSessionKey as buildRuntimeSessionKey } from "@openclaw/module/runtime/keys";
 
 export function createDefaultAgents(now = Date.now()): AgentProfile[] {
   return AGENT_TEMPLATES.map((template) => ({

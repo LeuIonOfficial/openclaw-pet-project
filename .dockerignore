@@ -1,0 +1,6 @@
+.git
+.env
+openclaw-data
+app/.next
+app/node_modules
+app/npm-debug.log

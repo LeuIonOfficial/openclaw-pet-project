@@ -12,8 +12,10 @@ services:
       - ./openclaw-data:/home/node/.openclaw
     restart: always
 
-  frontend:
-    build: ./frontend
+  app:
+    build:
+      context: .
+      dockerfile: app/Dockerfile
     container_name: openclaw_ui
     ports:
       - "3000:3000"
@@ -24,4 +26,5 @@ services:
     volumes:
       - ./openclaw-data:/app/openclaw
     depends_on:
-      - openclaw
+      openclaw:
+        condition: service_healthy
