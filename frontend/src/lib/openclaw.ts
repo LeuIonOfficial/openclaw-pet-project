@@ -2,6 +2,7 @@ import "server-only";
 
 import { promises as fs } from "node:fs";
 import crypto from "node:crypto";
+import { logError, logInfo, logWarn } from "@/lib/logger";
 
 const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
 const CONNECT_TIMEOUT_MS = 10_000;
@@ -58,6 +59,7 @@ export type ChatStreamEvent =
 type StreamChatParams = {
   message: string;
   sessionKey?: string;
+  requestId?: string;
   signal: AbortSignal;
   onEvent: (event: ChatStreamEvent) => void | Promise<void>;
 };
@@ -222,8 +224,45 @@ async function connectAndStreamChat(
   params: StreamChatParams,
   attempt = 0,
 ): Promise<void> {
-  const config = readGatewayConfig();
-  const identity = await loadIdentity(config.identityPath);
+  const requestId = params.requestId ?? crypto.randomUUID();
+  let config: GatewayConfig;
+
+  try {
+    config = readGatewayConfig();
+  } catch (error) {
+    logError("openclaw.gateway", "openclaw.config.error", {
+      requestId,
+      attempt,
+      message:
+        error instanceof Error ? error.message : "Failed to read gateway config.",
+    });
+    throw error;
+  }
+
+  let identity: DeviceIdentity;
+
+  try {
+    identity = await loadIdentity(config.identityPath);
+  } catch (error) {
+    logError("openclaw.gateway", "openclaw.identity.error", {
+      requestId,
+      attempt,
+      identityPath: config.identityPath,
+      message:
+        error instanceof Error ? error.message : "Failed to load device identity.",
+    });
+    throw error;
+  }
+
+  const startedAt = Date.now();
+
+  logInfo("openclaw.gateway", "openclaw.stream.init", {
+    requestId,
+    attempt,
+    gatewayUrl: config.url,
+    hasSessionKey: Boolean(params.sessionKey),
+    messageChars: params.message.length,
+  });
 
   await new Promise<void>((resolve, reject) => {
     const ws = new WebSocket(config.url);
@@ -231,6 +270,8 @@ async function connectAndStreamChat(
     const sendId = crypto.randomUUID();
     let resolvedSessionKey = params.sessionKey;
     let runId = "";
+    let deltaChunks = 0;
+    let deltaCharacters = 0;
     let settled = false;
 
     const cleanup = () => {
@@ -257,29 +298,55 @@ async function connectAndStreamChat(
       resolve();
     };
 
-    const fail = (message: string) => finish(new Error(message));
+    const fail = (message: string, data: Record<string, unknown> = {}) => {
+      logError("openclaw.gateway", "openclaw.stream.failure", {
+        requestId,
+        attempt,
+        runId: runId || undefined,
+        durationMs: Date.now() - startedAt,
+        message,
+        ...data,
+      });
+      finish(new Error(message));
+    };
 
     const timeoutId = setTimeout(() => {
-      fail("Timed out while connecting to OpenClaw.");
+      fail("Timed out while connecting to OpenClaw.", {
+        state: "connect-timeout",
+      });
     }, CONNECT_TIMEOUT_MS);
 
-    params.signal.addEventListener(
-      "abort",
-      () => finish(),
-      { once: true },
-    );
+    params.signal.addEventListener("abort", () => {
+      logWarn("openclaw.gateway", "openclaw.stream.aborted", {
+        requestId,
+        attempt,
+        runId: runId || undefined,
+        deltaChunks,
+        deltaCharacters,
+        durationMs: Date.now() - startedAt,
+      });
+      finish();
+    }, { once: true });
 
     ws.onerror = () => {
-      fail("OpenClaw websocket connection failed.");
+      fail("OpenClaw websocket connection failed.", { state: "socket-error" });
     };
 
     ws.onclose = (event) => {
       if (!settled) {
-        fail(`OpenClaw websocket closed (${event.code}).`);
+        fail(`OpenClaw websocket closed (${event.code}).`, {
+          state: "socket-close",
+          socketCode: event.code,
+          socketReason: event.reason,
+        });
       }
     };
 
     ws.onopen = () => {
+      logInfo("openclaw.gateway", "openclaw.socket.open", {
+        requestId,
+        attempt,
+      });
       void params.onEvent({ type: "status", stage: "connecting" });
     };
 
@@ -298,9 +365,16 @@ async function connectAndStreamChat(
             : "";
 
         if (!nonce) {
-          fail("OpenClaw challenge nonce was missing.");
+          fail("OpenClaw challenge nonce was missing.", {
+            state: "connect-challenge",
+          });
           return;
         }
+
+        logInfo("openclaw.gateway", "openclaw.connect.challenge", {
+          requestId,
+          attempt,
+        });
 
         const signedAtMs = Date.now();
         const payload = buildDeviceAuthPayload({
@@ -358,11 +432,20 @@ async function connectAndStreamChat(
             detailCode === "PAIRING_REQUIRED" &&
             attempt === 0
           ) {
+            logWarn("openclaw.gateway", "openclaw.connect.pairing_required", {
+              requestId,
+              attempt,
+              detailCode,
+            });
             finish(new Error("__PAIRING_RETRY__"));
             return;
           }
 
-          fail(message);
+          fail(message, {
+            state: "connect-response",
+            detailCode,
+            errorCode: frame.error?.code,
+          });
           return;
         }
 
@@ -383,6 +466,12 @@ async function connectAndStreamChat(
               : "agent:main:main";
         }
 
+        logInfo("openclaw.gateway", "openclaw.connect.accepted", {
+          requestId,
+          attempt,
+          resolvedSessionKey,
+        });
+
         void params.onEvent({ type: "status", stage: "connected" });
 
         ws.send(
@@ -402,7 +491,10 @@ async function connectAndStreamChat(
 
       if (frame.type === "res" && frame.id === sendId) {
         if (!frame.ok) {
-          fail(frame.error?.message ?? "chat.send failed.");
+          fail(frame.error?.message ?? "chat.send failed.", {
+            state: "chat-send",
+            errorCode: frame.error?.code,
+          });
           return;
         }
 
@@ -413,6 +505,13 @@ async function connectAndStreamChat(
           "runId" in payload && typeof payload.runId === "string"
             ? payload.runId
             : "";
+
+        logInfo("openclaw.gateway", "openclaw.chat.started", {
+          requestId,
+          attempt,
+          runId: runId || undefined,
+          sessionKey: resolvedSessionKey,
+        });
 
         void params.onEvent({ type: "status", stage: "started", runId });
         return;
@@ -432,6 +531,8 @@ async function connectAndStreamChat(
         const text = extractText(payload.message);
 
         if (text) {
+          deltaChunks += 1;
+          deltaCharacters += text.length;
           void params.onEvent({ type: "delta", text });
         }
 
@@ -439,9 +540,22 @@ async function connectAndStreamChat(
       }
 
       if (payload.state === "final") {
+        const finalText = extractText(payload.message);
+
+        logInfo("openclaw.gateway", "openclaw.chat.final", {
+          requestId,
+          attempt,
+          runId: runId || undefined,
+          stopReason: payload.stopReason,
+          deltaChunks,
+          deltaCharacters,
+          finalCharacters: finalText.length,
+          durationMs: Date.now() - startedAt,
+        });
+
         void params.onEvent({
           type: "final",
-          text: extractText(payload.message),
+          text: finalText,
           stopReason: payload.stopReason,
           usage: payload.usage,
         });
@@ -450,19 +564,39 @@ async function connectAndStreamChat(
       }
 
       if (payload.state === "aborted") {
-        fail("Chat request was aborted.");
+        fail("Chat request was aborted.", {
+          state: "chat-aborted",
+          deltaChunks,
+          deltaCharacters,
+        });
         return;
       }
 
       if (payload.state === "error") {
-        fail(payload.errorMessage ?? "Chat request failed.");
+        fail(payload.errorMessage ?? "Chat request failed.", {
+          state: "chat-error",
+          deltaChunks,
+          deltaCharacters,
+        });
       }
     };
   }).catch(async (error) => {
     if (error instanceof Error && error.message === "__PAIRING_RETRY__") {
+      logWarn("openclaw.gateway", "openclaw.connect.retry_pairing", {
+        requestId,
+        attempt,
+        delayMs: 1_500,
+      });
       await new Promise((resolve) => setTimeout(resolve, 1_500));
-      return connectAndStreamChat(params, attempt + 1);
+      return connectAndStreamChat({ ...params, requestId }, attempt + 1);
     }
+
+    logError("openclaw.gateway", "openclaw.stream.unhandled_error", {
+      requestId,
+      attempt,
+      durationMs: Date.now() - startedAt,
+      message: error instanceof Error ? error.message : "Unknown stream error.",
+    });
 
     throw error;
   });
