@@ -16,6 +16,7 @@ openclaw-data/logs/
 openclaw-data/openclaw.json.bak*
 openclaw-data/update-check.json
 openclaw-data/workspace/
+openclaw-data/workspace-*/
 
 # OS/editor
 .DS_Store

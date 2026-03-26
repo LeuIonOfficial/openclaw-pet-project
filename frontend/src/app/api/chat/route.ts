@@ -13,18 +13,42 @@ function encodeEvent(event: ChatStreamEvent): Uint8Array {
   return encoder.encode(`data: ${JSON.stringify(event)}\n\n`);
 }
 
+function buildAgentMessage(params: {
+  message: string;
+  agentName?: string;
+  agentPrompt?: string;
+}): string {
+  if (!params.agentPrompt) {
+    return params.message;
+  }
+
+  const label = params.agentName ?? "Custom Agent";
+
+  return [
+    `System instructions for ${label}:`,
+    params.agentPrompt,
+    "",
+    "User message:",
+    params.message,
+  ].join("\n");
+}
+
 export async function POST(request: NextRequest): Promise<Response> {
   const requestId = crypto.randomUUID();
   const startedAt = Date.now();
   let body: {
     message?: unknown;
     sessionKey?: unknown;
+    agentName?: unknown;
+    agentPrompt?: unknown;
   };
 
   try {
     body = (await request.json()) as {
       message?: unknown;
       sessionKey?: unknown;
+      agentName?: unknown;
+      agentPrompt?: unknown;
     };
   } catch (error) {
     logWarn("chat.api", "chat.request.invalid_json", {
@@ -42,6 +66,19 @@ export async function POST(request: NextRequest): Promise<Response> {
     typeof body.sessionKey === "string" && body.sessionKey.trim()
       ? body.sessionKey.trim()
       : undefined;
+  const agentName =
+    typeof body.agentName === "string" && body.agentName.trim()
+      ? body.agentName.trim()
+      : undefined;
+  const agentPrompt =
+    typeof body.agentPrompt === "string" && body.agentPrompt.trim()
+      ? body.agentPrompt.trim()
+      : undefined;
+  const outboundMessage = buildAgentMessage({
+    message,
+    agentName,
+    agentPrompt,
+  });
 
   if (!message) {
     logWarn("chat.api", "chat.request.missing_message", {
@@ -56,7 +93,10 @@ export async function POST(request: NextRequest): Promise<Response> {
   logInfo("chat.api", "chat.request.received", {
     requestId,
     hasSessionKey: Boolean(sessionKey),
+    hasAgentPrompt: Boolean(agentPrompt),
+    agentName,
     messageChars: message.length,
+    outboundMessageChars: outboundMessage.length,
   });
 
   const stream = new ReadableStream<Uint8Array>({
@@ -113,7 +153,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       };
 
       void streamChat({
-        message,
+        message: outboundMessage,
         sessionKey,
         requestId,
         signal: request.signal,
