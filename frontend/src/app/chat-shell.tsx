@@ -1,16 +1,28 @@
 "use client";
 
 import Image from "next/image";
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useDropzone, type FileRejection } from "react-dropzone";
-import { Menu, Paperclip, Plus, Send, Trash2 } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  FileText,
+  Folder,
+  FolderOpen,
+  Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Paperclip,
+  Plus,
+  Send,
+  Trash2,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -49,6 +61,23 @@ function formatBytes(value: number): string {
   }
 
   return `${(value / (1_024 * 1_024)).toFixed(1)} MB`;
+}
+
+function agentInitials(name: string): string {
+  const tokens = name
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter(Boolean);
+
+  if (!tokens.length) {
+    return "A";
+  }
+
+  if (tokens.length === 1) {
+    return tokens[0].slice(0, 2).toUpperCase();
+  }
+
+  return `${tokens[0][0] ?? "A"}${tokens[1][0] ?? "G"}`.toUpperCase();
 }
 
 function connectionVariant(
@@ -169,14 +198,19 @@ function AttachmentPreview({
   );
 }
 
+type SidebarContentProps = {
+  controller: ChatWorkspaceController;
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
+};
+
 function SidebarContent({
   controller,
-}: {
-  controller: ChatWorkspaceController;
-}) {
+  isCollapsed = false,
+  onToggleCollapse,
+}: SidebarContentProps) {
   const {
     agents,
-    selectedAgent,
     selectedAgentId,
     visibleThreads,
     activeThread,
@@ -202,183 +236,273 @@ function SidebarContent({
     handleCreateAgent,
   } = controller;
 
+  if (isCollapsed) {
+    return (
+      <div className="flex h-full min-h-0 flex-col items-center border-r border-white/10 bg-slate-950/82 px-2 py-3">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          onClick={onToggleCollapse}
+          className="h-9 w-9 rounded-lg border border-white/15 bg-white/5 text-slate-200 hover:bg-white/10"
+          title="Expand sidebar"
+          aria-label="Expand sidebar"
+        >
+          <PanelLeftOpen className="h-4 w-4" />
+        </Button>
+
+        <Button
+          type="button"
+          onClick={createThreadForSelectedAgent}
+          disabled={isSubmitting}
+          size="icon"
+          className="mt-2 h-9 w-9 rounded-lg bg-amber-300 text-slate-950 hover:bg-amber-200"
+          title="New chat"
+          aria-label="New chat"
+        >
+          <Plus className="h-4 w-4" />
+        </Button>
+
+        <ScrollArea className="mt-3 w-full min-h-0 flex-1">
+          <div className="flex flex-col items-center gap-2 py-1">
+            {agents.map((agent) => {
+              const isSelected = selectedAgentId === agent.id;
+
+              return (
+                <Button
+                  key={agent.id}
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => selectAgent(agent.id)}
+                  className={cn(
+                    "h-9 w-9 rounded-lg border text-[10px] font-semibold tracking-[0.03em]",
+                    isSelected
+                      ? "border-sky-300/45 bg-sky-300/12 text-sky-100"
+                      : "border-transparent bg-white/5 text-slate-300 hover:border-white/15 hover:bg-white/10",
+                  )}
+                  title={agent.name}
+                  aria-label={agent.name}
+                >
+                  {agentInitials(agent.name)}
+                </Button>
+              );
+            })}
+          </div>
+        </ScrollArea>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex h-full min-h-0 flex-col border-r border-white/10 bg-slate-950/78 px-3 py-4">
-      <div className="mb-4 border-b border-white/10 px-1 pb-4">
-        <p className="font-mono text-[11px] uppercase tracking-[0.26em] text-slate-400">
-          OpenClaw
-        </p>
-        <p className="text-base font-semibold text-slate-100">Agent Workspace</p>
+    <div className="flex h-full min-h-0 flex-col border-r border-white/10 bg-[#1a2433] px-3 py-3">
+      <div className="mb-3 flex items-start justify-between gap-2 border-b border-white/10 px-1 pb-3">
+        <div className="min-w-0">
+          <p className="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-400">
+            OpenClaw
+          </p>
+          <p className="text-sm font-semibold text-slate-100">Agent Workspace</p>
+        </div>
+        {onToggleCollapse ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={onToggleCollapse}
+            className="h-8 w-8 rounded-md border border-white/15 bg-white/5 text-slate-300 hover:bg-white/10"
+            title="Collapse sidebar"
+            aria-label="Collapse sidebar"
+          >
+            <PanelLeftClose className="h-4 w-4" />
+          </Button>
+        ) : null}
       </div>
 
       <Button
         type="button"
         onClick={createThreadForSelectedAgent}
         disabled={isSubmitting}
-        className="mb-4 justify-start rounded-xl bg-amber-300 text-slate-950 hover:bg-amber-200"
+        className="mb-3 justify-start rounded-lg bg-amber-300 text-slate-950 hover:bg-amber-200"
       >
         <Plus className="mr-2 h-4 w-4" />
         New Chat
       </Button>
 
-      <p className="mb-2 px-1 font-mono text-[11px] uppercase tracking-[0.24em] text-slate-500">
-        Agents
-      </p>
-
-      <ScrollArea className="mb-4 max-h-56 pr-1">
-        <div className="space-y-1 pb-1 pr-2">
-          {agents.map((agent, index) => (
-            <Button
-              key={agent.id}
-              type="button"
-              variant="ghost"
-              onClick={() => selectAgent(agent.id)}
-              style={{ animationDelay: `${index * 35}ms` }}
-              className={cn(
-                "app-enter-soft row-shift h-auto w-full flex-col items-start rounded-xl border px-3 py-2.5 text-left",
-                selectedAgentId === agent.id
-                  ? "border-sky-300/40 bg-sky-300/10"
-                  : "border-transparent bg-white/5 hover:border-white/15 hover:bg-white/10",
-              )}
-            >
-              <span className="line-clamp-1 w-full text-sm font-medium text-slate-100">
-                {agent.name}
-              </span>
-              <span className="line-clamp-2 w-full text-xs leading-5 text-slate-400">
-                {agent.instructions}
-              </span>
-            </Button>
-          ))}
-        </div>
-      </ScrollArea>
-
-      {isCreatingAgent ? (
-        <form
-          onSubmit={handleCreateAgent}
-          className="mb-4 space-y-2 rounded-xl border border-white/15 bg-white/5 p-3"
-        >
-          <Input
-            value={newAgentName}
-            onChange={(event) => setNewAgentNameValue(event.target.value)}
-            placeholder="Agent name"
-            className="h-10"
-          />
-          <Textarea
-            value={newAgentInstructions}
-            onChange={(event) => setNewAgentInstructionsValue(event.target.value)}
-            placeholder="Agent instructions"
-            rows={4}
-            className="min-h-[112px] resize-none rounded-xl px-3 py-2"
-          />
-          <div className="flex gap-2">
-            <Button
-              type="submit"
-              disabled={!newAgentName.trim() || !newAgentInstructions.trim()}
-              className="h-9 flex-1 bg-amber-300 text-xs uppercase tracking-[0.14em] text-slate-950 hover:bg-amber-200"
-            >
-              Create
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={cancelCreateAgent}
-              className="h-9 border-white/20 px-3 text-xs uppercase tracking-[0.14em] text-slate-200"
-            >
-              Cancel
-            </Button>
-          </div>
-        </form>
-      ) : (
-        <Button
-          type="button"
-          variant="outline"
-          onClick={startCreateAgent}
-          className="mb-4 h-10 rounded-xl border-white/15 bg-white/5 text-xs uppercase tracking-[0.16em] text-slate-200 hover:bg-white/10"
-        >
-          <Plus className="mr-2 h-3.5 w-3.5" />
-          Create Agent
-        </Button>
-      )}
-
-      <p className="mb-2 px-1 font-mono text-[11px] uppercase tracking-[0.24em] text-slate-500">
-        {selectedAgent?.name ?? "Agent"} Chats
-      </p>
-
       <ScrollArea className="min-h-0 flex-1 pr-1">
-        <div className="space-y-1 pb-2 pr-2">
-          {visibleThreads.length ? (
-            visibleThreads.map((thread, index) => (
+        <div className="space-y-3 pb-2 pr-1">
+          <div className="px-1">
+            <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-slate-500">
+              Thread Tree
+            </p>
+          </div>
+          <div className="space-y-0.5">
+            {agents.map((agent, index) => {
+              const isSelected = selectedAgentId === agent.id;
+
+              return (
+                <div
+                  key={agent.id}
+                  style={{ animationDelay: `${index * 28}ms` }}
+                  className="app-enter-soft"
+                >
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => selectAgent(agent.id)}
+                    className={cn(
+                      "h-9 w-full justify-start rounded-md border px-2.5 text-left text-xs",
+                      isSelected
+                        ? "border-white/20 bg-white/10 text-slate-100"
+                        : "border-transparent bg-transparent text-slate-300 hover:border-white/10 hover:bg-white/6",
+                    )}
+                  >
+                    {isSelected ? (
+                      <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                    ) : (
+                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+                    )}
+                    {isSelected ? (
+                      <FolderOpen className="h-3.5 w-3.5 shrink-0 text-sky-200" />
+                    ) : (
+                      <Folder className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                    )}
+                    <span className="min-w-0 truncate font-medium">{agent.name}</span>
+                  </Button>
+
+                  {isSelected ? (
+                    <div className="ml-4 mt-1 space-y-0.5 border-l border-white/12 pl-2">
+                      {visibleThreads.length ? (
+                        visibleThreads.map((thread) => (
+                          <Button
+                            key={thread.id}
+                            type="button"
+                            variant="ghost"
+                            onClick={() => selectThread(thread)}
+                            className={cn(
+                              "h-auto w-full items-start justify-start gap-2 rounded-md px-2 py-1.5 text-left",
+                              activeThread?.id === thread.id
+                                ? "bg-slate-100/8 text-slate-100"
+                                : "text-slate-400 hover:bg-white/6 hover:text-slate-200",
+                            )}
+                          >
+                            <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                            <span className="min-w-0 space-y-0.5">
+                              <span className="block truncate text-xs font-medium leading-5">
+                                {thread.title}
+                              </span>
+                              <span className="block truncate text-[10px] text-slate-500">
+                                {getThreadPreview(thread)}
+                              </span>
+                              <span className="block text-[9px] uppercase tracking-[0.14em] text-slate-500">
+                                {formatUpdatedAt(thread.updatedAt)}
+                              </span>
+                            </span>
+                          </Button>
+                        ))
+                      ) : (
+                        <p className="px-2 py-1 text-[11px] text-slate-500">
+                          Empty folder
+                        </p>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="border-t border-white/10 pt-2">
+            {isCreatingAgent ? (
+              <form
+                onSubmit={handleCreateAgent}
+                className="space-y-2 rounded-lg border border-white/15 bg-white/5 p-2.5"
+              >
+                <Input
+                  value={newAgentName}
+                  onChange={(event) => setNewAgentNameValue(event.target.value)}
+                  placeholder="Agent name"
+                  className="h-9"
+                />
+                <Textarea
+                  value={newAgentInstructions}
+                  onChange={(event) =>
+                    setNewAgentInstructionsValue(event.target.value)
+                  }
+                  placeholder="Agent instructions"
+                  rows={3}
+                  className="min-h-[90px] resize-none rounded-lg px-3 py-2"
+                />
+                <div className="flex gap-2">
+                  <Button
+                    type="submit"
+                    disabled={!newAgentName.trim() || !newAgentInstructions.trim()}
+                    className="h-8 flex-1 bg-amber-300 text-[11px] uppercase tracking-[0.12em] text-slate-950 hover:bg-amber-200"
+                  >
+                    Create
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={cancelCreateAgent}
+                    className="h-8 border-white/20 px-2.5 text-[11px] uppercase tracking-[0.12em] text-slate-200"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </form>
+            ) : (
               <Button
-                key={thread.id}
                 type="button"
                 variant="ghost"
-                onClick={() => selectThread(thread)}
-                style={{ animationDelay: `${index * 28}ms` }}
-                className={cn(
-                  "app-enter-soft row-shift h-auto w-full flex-col items-start gap-1 rounded-xl border px-3 py-2.5 text-left",
-                  activeThread?.id === thread.id
-                    ? "border-amber-300/40 bg-amber-300/10"
-                    : "border-transparent bg-white/5 hover:border-white/15 hover:bg-white/10",
-                )}
+                onClick={startCreateAgent}
+                className="h-8 w-full justify-start rounded-md text-[11px] uppercase tracking-[0.16em] text-slate-300 hover:bg-white/8"
               >
-                <span className="line-clamp-1 w-full text-sm font-medium text-slate-100">
-                  {thread.title}
-                </span>
-                <span className="line-clamp-2 w-full text-xs leading-5 text-slate-400">
-                  {getThreadPreview(thread)}
-                </span>
-                <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-slate-500">
-                  {formatUpdatedAt(thread.updatedAt)}
-                </span>
+                <Plus className="h-3.5 w-3.5" />
+                New Agent Folder
               </Button>
-            ))
-          ) : (
-            <div className="rounded-xl border border-dashed border-white/15 bg-white/5 p-3 text-xs leading-6 text-slate-300">
-              No chats yet for this agent.
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </ScrollArea>
 
-      <Card className="mt-4 border-white/12 bg-white/5">
+      <Card className="mt-3 border-white/12 bg-white/5">
         <CardHeader className="pb-2">
-          <CardTitle className="font-mono text-[10px] uppercase tracking-[0.18em] text-slate-400">
+          <CardTitle className="font-mono text-[9px] uppercase tracking-[0.18em] text-slate-400">
             Gateway Config
           </CardTitle>
-          <CardDescription>Applied to OpenClaw gateway runtime.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-2">
           <Input
             value={configDraft.modelPrimary}
             onChange={(event) => setConfigModelPrimaryValue(event.target.value)}
             placeholder="Model id"
-            className="h-9 text-xs"
+            className="h-8 text-[11px]"
           />
           <div className="grid grid-cols-2 gap-2">
             <Input
               value={configDraft.gatewayMode}
               onChange={(event) => setConfigGatewayModeValue(event.target.value)}
               placeholder="Mode"
-              className="h-9 text-xs"
+              className="h-8 text-[11px]"
             />
             <Input
               value={configDraft.gatewayBind}
               onChange={(event) => setConfigGatewayBindValue(event.target.value)}
               placeholder="Bind"
-              className="h-9 text-xs"
+              className="h-8 text-[11px]"
             />
           </div>
           <Input
             value={configDraft.tokenEnvId}
             onChange={(event) => setConfigTokenEnvIdValue(event.target.value)}
             placeholder="Token env id"
-            className="h-9 text-xs"
+            className="h-8 text-[11px]"
           />
           <Button
             type="button"
             onClick={() => void handleConfigSubmit()}
             disabled={isConfigSaving}
-            className="h-9 w-full rounded-lg bg-sky-300 text-xs uppercase tracking-[0.16em] text-slate-950 hover:bg-sky-200"
+            className="h-8 w-full rounded-lg bg-sky-300 text-[11px] uppercase tracking-[0.16em] text-slate-950 hover:bg-sky-200"
           >
             {isConfigSaving ? "Saving..." : "Save Config"}
           </Button>
@@ -411,6 +535,21 @@ export function ChatShell() {
     handleAttachmentFiles,
     handleSubmit,
   } = controller;
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+
+    return localStorage.getItem("openclaw.sidebar.collapsed") === "1";
+  });
+
+  const toggleSidebarCollapsed = useCallback(() => {
+    setIsSidebarCollapsed((current) => {
+      const next = !current;
+      localStorage.setItem("openclaw.sidebar.collapsed", next ? "1" : "0");
+      return next;
+    });
+  }, []);
 
   const onDrop = useCallback(
     (acceptedFiles: File[], rejections: FileRejection[]) => {
@@ -445,9 +584,18 @@ export function ChatShell() {
       </div>
 
       <div className="relative mx-auto h-full w-full max-w-[1680px] p-2 sm:p-4">
-        <div className="app-enter grid h-full min-h-0 overflow-hidden rounded-[28px] border border-white/10 bg-slate-950/72 shadow-[0_28px_90px_rgba(2,6,23,0.58)] lg:grid-cols-[340px_minmax(0,1fr)]">
+        <div
+          className={cn(
+            "app-enter grid h-full min-h-0 overflow-hidden rounded-[28px] border border-white/10 bg-slate-950/72 shadow-[0_28px_90px_rgba(2,6,23,0.58)] lg:grid-cols-[320px_minmax(0,1fr)]",
+            isSidebarCollapsed && "lg:grid-cols-[74px_minmax(0,1fr)]",
+          )}
+        >
           <aside className="hidden min-h-0 lg:flex">
-            <SidebarContent controller={controller} />
+            <SidebarContent
+              controller={controller}
+              isCollapsed={isSidebarCollapsed}
+              onToggleCollapse={toggleSidebarCollapsed}
+            />
           </aside>
 
           <Sheet open={isSidebarOpen} onOpenChange={setSidebarOpen}>
