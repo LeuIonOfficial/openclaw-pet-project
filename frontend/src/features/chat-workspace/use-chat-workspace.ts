@@ -223,12 +223,10 @@ export type ChatWorkspaceController = {
 };
 
 export function useChatWorkspace(): ChatWorkspaceController {
-  const [agents, setAgents] = useState<AgentProfile[]>(() => createDefaultAgents());
-  const [threads, setThreads] = useState<ChatThread[]>(() => [
-    createThread(AGENT_TEMPLATES[0].id),
-  ]);
+  const [agents, setAgents] = useState<AgentProfile[]>([]);
+  const [threads, setThreads] = useState<ChatThread[]>([]);
   const [activeThreadId, setActiveThreadId] = useState("");
-  const [selectedAgentId, setSelectedAgentId] = useState(AGENT_TEMPLATES[0].id);
+  const [selectedAgentId, setSelectedAgentId] = useState("");
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState("");
