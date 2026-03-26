@@ -8,6 +8,9 @@ This repository contains a Dockerized chat application for the OpenClaw technica
 - Next.js 16 App Router for both frontend and backend
 - Server-side streaming from Next route handlers to the browser with SSE
 - Anthropic Claude Sonnet 4.5 configured as the default OpenClaw model
+- Tool-call timeline rendering from OpenClaw `agent` tool events
+- Image attachment support (chat composer -> gateway `chat.send.attachments`)
+- Config generator API/UI for programmatic `openclaw.json` updates
 
 ## Prerequisites
 
@@ -33,9 +36,16 @@ Then open [http://localhost:3000](http://localhost:3000).
 
 - The `openclaw` service mounts `./openclaw-data` and reads `openclaw-data/openclaw.json`.
 - The Next.js service talks to `ws://openclaw:18789` from server route handlers, not from the browser.
-- The frontend container mounts `./openclaw-data` read-only and reuses the gateway identity file created by OpenClaw at `openclaw-data/identity/device.json`.
-- `POST /api/chat` performs the OpenClaw handshake, sends `chat.send`, and forwards `chat` events to the browser as an SSE stream.
+- The frontend container mounts `./openclaw-data` and reuses the gateway identity file created by OpenClaw at `openclaw-data/identity/device.json`.
+- `POST /api/chat` performs the OpenClaw handshake, forces session `verboseLevel=full`, sends `chat.send` with optional attachments, and forwards both `chat` + tool lifecycle events to the browser as SSE.
+- `GET/POST /api/config` reads and updates `openclaw-data/openclaw.json` (model + gateway basics) from the sidebar config panel.
 - The browser reads that SSE stream incrementally and updates the assistant message in place.
+
+## UI Notes
+
+- Sidebar supports multiple agents, multiple isolated chats per agent, and a gateway config panel.
+- Composer supports image attachments (`image/*`, up to 3 files, 5MB each).
+- Assistant bubbles render markdown after stream completion and show tool execution cards (status, params, output).
 
 ## Verification
 

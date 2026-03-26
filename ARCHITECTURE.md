@@ -16,7 +16,7 @@ The browser never connects directly to the OpenClaw websocket. All gateway traff
 3. The Next.js route handler opens a websocket connection to the OpenClaw gateway.
 4. The handler completes the gateway challenge-response handshake.
 5. The handler sends `chat.send`.
-6. The handler listens for `chat` events and forwards them to the browser as SSE messages.
+6. The handler listens for `chat` events plus `agent` tool lifecycle events and forwards normalized SSE messages to the browser.
 7. The browser consumes the SSE stream and updates the in-progress assistant message incrementally.
 
 ## Key Decisions
@@ -32,6 +32,10 @@ This reduces operational complexity for the assessment:
 ### Server-mediated streaming
 
 Streaming is implemented from OpenClaw to Next.js over WebSocket, then from Next.js to the browser over SSE. That keeps secrets server-side and avoids exposing the raw gateway protocol in the browser.
+
+To support tool call visibility, the server route also listens to gateway `agent` events (`stream: "tool"`) and emits normalized tool timeline events to the UI.
+
+To improve stream stability, the server merges delta fragments into a running snapshot before forwarding, so the client does not render duplicated transient text.
 
 ### OpenClaw identity reuse
 
@@ -57,3 +61,5 @@ SSE is enough for one-way assistant streaming and is simpler than adding a secon
 ### Why the model is configured in OpenClaw
 
 The Next.js app stays protocol-focused. Model routing and provider concerns remain in the gateway config where they belong.
+
+The app includes a lightweight config generator endpoint (`/api/config`) that updates core OpenClaw settings (model primary + gateway mode/bind/auth env key) programmatically, so changes can be made from the UI instead of manual JSON edits.
