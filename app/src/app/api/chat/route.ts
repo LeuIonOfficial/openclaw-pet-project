@@ -2,7 +2,11 @@ import crypto from "node:crypto";
 import { NextRequest } from "next/server";
 
 import { logError, logInfo, logWarn } from "@/modules/app/logger";
-import { streamChat, type ChatStreamEvent } from "@openclaw/module";
+import {
+  bootstrapAgentWorkspace,
+  streamChat,
+  type ChatStreamEvent,
+} from "@openclaw/module";
 import { parseChatRequest } from "@/modules/app/schemas/chat";
 
 export const runtime = "nodejs";
@@ -67,7 +71,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     );
   }
 
-  const { message, sessionKey, agentName, agentPrompt, attachments } =
+  const { message, sessionKey, agentId, agentName, agentPrompt, attachments } =
     parsedRequest.data;
   const hasAttachments = attachments.length > 0;
   const messageForGateway = message || "Please analyze the attached image(s).";
@@ -90,9 +94,52 @@ export async function POST(request: NextRequest): Promise<Response> {
     );
   }
 
+  const workspaceDraft =
+    agentId && agentName && agentPrompt
+      ? {
+          agentId,
+          name: agentName,
+          instructions: agentPrompt,
+        }
+      : null;
+
+  if (workspaceDraft) {
+    const workspaceStartedAt = Date.now();
+
+    try {
+      const workspace = await bootstrapAgentWorkspace(workspaceDraft);
+
+      logInfo("chat.api", "chat.agent_workspace.bootstrap.completed", {
+        requestId,
+        agentId: workspaceDraft.agentId,
+        workspaceFolder: workspace.workspaceFolder,
+        managedFiles: workspace.managedFiles,
+        durationMs: Date.now() - workspaceStartedAt,
+      });
+    } catch (error) {
+      const messageText =
+        error instanceof Error
+          ? error.message
+          : "Failed to bootstrap workspace before chat.";
+
+      logError("chat.api", "chat.agent_workspace.bootstrap.failed", {
+        requestId,
+        agentId: workspaceDraft.agentId,
+        durationMs: Date.now() - workspaceStartedAt,
+        message: messageText,
+      });
+
+      return Response.json(
+        { error: "Failed to prepare agent workspace." },
+        { status: 500 },
+      );
+    }
+  }
+
   logInfo("chat.api", "chat.request.received", {
     requestId,
     hasSessionKey: Boolean(sessionKey),
+    hasAgentId: Boolean(agentId),
     hasAgentPrompt: Boolean(agentPrompt),
     agentName,
     messageChars: message.length,

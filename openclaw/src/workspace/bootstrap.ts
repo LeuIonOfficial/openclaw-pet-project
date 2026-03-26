@@ -4,7 +4,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import { buildWorkspaceFolderName, normalizeRuntimeKey } from "../runtime/keys";
-import type { AgentWorkspaceDraft } from './types';
+import type { AgentWorkspaceDraft } from "./types";
 
 const DEFAULT_OPENCLAW_ROOT = "/app/openclaw";
 const MANAGED_PROFILE_START = "<!-- OPENCLAW_APP_AGENT_PROFILE_START -->";
@@ -103,6 +103,37 @@ function buildManagedProfileSection(draft: AgentWorkspaceDraft): string {
   ].join("\n");
 }
 
+function buildManagedBootstrapFile(draft: AgentWorkspaceDraft): string {
+  return [
+    "# BOOTSTRAP.md - App Managed",
+    "",
+    "This workspace is managed by OpenClaw App.",
+    "Do NOT run blank-slate onboarding or ask the user to name/configure you.",
+    "Your identity and role are already configured.",
+    "",
+    "## Active Agent",
+    "",
+    `- Agent ID: \`${draft.agentId}\``,
+    `- Name: ${draft.name}`,
+    "",
+    "## Behavior",
+    "",
+    "- Start directly from the user's latest request.",
+    "- Use the instructions below as authoritative role configuration.",
+    "- Ask only task-relevant clarifying questions.",
+    "- Keep responses practical and concise unless user asks for depth.",
+    "",
+    "## Instructions",
+    "",
+    draft.instructions,
+    "",
+    "## Note",
+    "",
+    "This file is auto-generated and may be updated by the app.",
+    "",
+  ].join("\n");
+}
+
 async function seedWorkspaceState(workspacePath: string): Promise<void> {
   const statePath = path.join(workspacePath, ".openclaw", "workspace-state.json");
   const existing = await readFileIfExists(statePath);
@@ -177,7 +208,10 @@ export async function bootstrapAgentWorkspace(draft: AgentWorkspaceDraft): Promi
     const baseContent =
       existing ??
       (await resolveTemplateContent(rootPath, fileName));
-    const next = upsertManagedSection(baseContent, profileSection);
+    const next =
+      fileName === "BOOTSTRAP.md"
+        ? buildManagedBootstrapFile(draft)
+        : upsertManagedSection(baseContent, profileSection);
 
     await fs.writeFile(targetPath, next, "utf8");
     managedFiles.push(fileName);

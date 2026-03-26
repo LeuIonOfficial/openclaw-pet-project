@@ -22,6 +22,7 @@ const chatRequestSchema = z
   .object({
     message: z.string().optional(),
     sessionKey: z.string().optional(),
+    agentId: z.string().optional(),
     agentName: z.string().optional(),
     agentPrompt: z.string().optional(),
     attachments: z
@@ -36,6 +37,7 @@ type ParsedChatBody = z.infer<typeof chatRequestSchema>;
 export type ParsedChatRequest = {
   message: string;
   sessionKey?: string;
+  agentId?: string;
   agentName?: string;
   agentPrompt?: string;
   attachments: NormalizedAttachment[];
@@ -152,6 +154,7 @@ export function parseChatRequest(body: unknown): {
     data: {
       message: asOptionalText(parsed.data.message) ?? "",
       sessionKey: asOptionalText(parsed.data.sessionKey),
+      agentId: asOptionalText(parsed.data.agentId),
       agentName: asOptionalText(parsed.data.agentName),
       agentPrompt: asOptionalText(parsed.data.agentPrompt),
       attachments: normalized.attachments,

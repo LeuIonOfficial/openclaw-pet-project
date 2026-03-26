@@ -773,6 +773,7 @@ export function useChatWorkspace(): ChatWorkspaceController {
               dataUrl: attachment.dataUrl,
             })),
             sessionKey: targetThread.sessionKey,
+            agentId: targetAgent.id,
             agentName: targetAgent.name,
             agentPrompt: targetAgent.instructions,
           }),
