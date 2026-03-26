@@ -147,6 +147,37 @@ function formatUpdatedAt(timestamp: number): string {
   }).format(timestamp);
 }
 
+function mergeStreamText(previous: string, incoming: string): string {
+  if (!incoming) {
+    return previous;
+  }
+
+  if (!previous) {
+    return incoming;
+  }
+
+  // Some providers stream cumulative snapshots ("full text so far").
+  if (incoming.startsWith(previous)) {
+    return incoming;
+  }
+
+  // Ignore shorter regressions during intermittent stream hiccups.
+  if (previous.startsWith(incoming)) {
+    return previous;
+  }
+
+  // Token streams can arrive with overlapping boundaries; dedupe overlap.
+  const maxOverlap = Math.min(previous.length, incoming.length);
+
+  for (let size = maxOverlap; size > 0; size -= 1) {
+    if (previous.slice(-size) === incoming.slice(0, size)) {
+      return `${previous}${incoming.slice(size)}`;
+    }
+  }
+
+  return `${previous}${incoming}`;
+}
+
 function AssistantMarkdown({ content }: { content: string }) {
   return (
     <div className="text-sm leading-7 sm:text-[15px] [&_a]:text-amber-200 [&_a]:underline [&_blockquote]:mb-4 [&_blockquote]:border-l-2 [&_blockquote]:border-white/20 [&_blockquote]:pl-3 [&_code]:rounded-md [&_code]:bg-black/30 [&_code]:px-1.5 [&_code]:py-0.5 [&_ol]:mb-4 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-4 [&_p:last-child]:mb-0 [&_pre]:mb-4 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:bg-black/35 [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:mb-4 [&_ul]:list-disc [&_ul]:pl-5">
@@ -632,7 +663,7 @@ export function ChatShell() {
                   entry.id === assistantMessageId
                     ? {
                         ...entry,
-                        content: `${entry.content}${payload.text}`,
+                        content: mergeStreamText(entry.content, payload.text),
                       }
                     : entry,
                 ),
