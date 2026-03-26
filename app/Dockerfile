@@ -20,4 +20,4 @@ COPY --from=builder /workspace/app/.next/standalone ./
 COPY --from=builder /workspace/app/.next/static ./.next/static
 COPY --from=builder /workspace/app/scripts ./scripts
 EXPOSE 3000
-CMD ["sh", "-lc", "node ./scripts/bootstrap-identity.mjs && node server.js"]
+CMD ["sh", "-lc", "node ./scripts/bootstrap-identity.mjs && node ./scripts/prepair-openclaw.mjs && node server.js"]

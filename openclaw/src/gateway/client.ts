@@ -8,6 +8,7 @@ const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
 const CONNECT_TIMEOUT_MS = 10_000;
 const PATCH_FALLBACK_MS = 450;
 const PAIRING_RETRY_DELAY_MS = 1_500;
+const PAIRING_MAX_CONNECT_ATTEMPTS = 8;
 const DEFAULT_SESSION_KEY = 'agent:main:main';
 const PAIRING_RETRY_SENTINEL = '__PAIRING_RETRY__';
 
@@ -1186,13 +1187,22 @@ class OpenClawGatewayClient {
           const detailCode = frame.error?.details?.code;
           const message = frame.error?.message ?? 'OpenClaw connect failed.';
 
-          if (detailCode === 'PAIRING_REQUIRED' && params.attempt === 0) {
-            logWarn('openclaw.gateway', 'openclaw.connect.pairing_required', {
-              requestId: params.requestId,
-              attempt: params.attempt,
+          if (detailCode === 'PAIRING_REQUIRED') {
+            if (params.attempt < PAIRING_MAX_CONNECT_ATTEMPTS - 1) {
+              logWarn('openclaw.gateway', 'openclaw.connect.pairing_required', {
+                requestId: params.requestId,
+                attempt: params.attempt,
+                detailCode,
+              });
+              finish(new Error(PAIRING_RETRY_SENTINEL));
+              return;
+            }
+
+            fail(message, {
+              state: 'connect-response',
               detailCode,
+              errorCode: frame.error?.code,
             });
-            finish(new Error(PAIRING_RETRY_SENTINEL));
             return;
           }
 
@@ -1275,7 +1285,7 @@ class OpenClawGatewayClient {
         throw error;
       }
 
-      for (let attempt = 0; attempt < 2; attempt += 1) {
+      for (let attempt = 0; attempt < PAIRING_MAX_CONNECT_ATTEMPTS; attempt += 1) {
         try {
           const ws = await this.establishConnectedSocket({
             config,
@@ -1291,11 +1301,12 @@ class OpenClawGatewayClient {
           if (
             error instanceof Error &&
             error.message === PAIRING_RETRY_SENTINEL &&
-            attempt === 0
+            attempt < PAIRING_MAX_CONNECT_ATTEMPTS - 1
           ) {
             logWarn('openclaw.gateway', 'openclaw.connect.retry_pairing', {
               requestId,
               attempt,
+              remainingAttempts: PAIRING_MAX_CONNECT_ATTEMPTS - attempt - 1,
               delayMs: PAIRING_RETRY_DELAY_MS,
             });
             await new Promise((resolve) =>

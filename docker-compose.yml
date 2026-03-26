@@ -16,6 +16,19 @@ services:
           openclaw config set gateway.auth.mode token
           openclaw config set gateway.auth.token "${OPENCLAW_GATEWAY_TOKEN}"
           openclaw config set gateway.controlUi.allowedOrigins '["http://localhost:3000","http://127.0.0.1:3000","http://0.0.0.0:3000","http://host.docker.internal:3000"]' --strict-json
+
+          if [ "${OPENCLAW_AUTO_APPROVE_PENDING_DEVICES:-true}" = "true" ]; then
+            echo "[openclaw-startup] auto-approve pending devices enabled"
+            (
+              while true; do
+                if node -e 'const fs=require("fs");try{const p=JSON.parse(fs.readFileSync("/home/node/.openclaw/devices/pending.json","utf8"));process.exit(Object.keys(p||{}).length>0?0:1);}catch{process.exit(1);}'; then
+                  openclaw devices approve --latest --json --timeout "${OPENCLAW_AUTO_APPROVE_TIMEOUT_MS:-1000}" >>/tmp/openclaw-auto-approve.log 2>&1 || true
+                fi
+                sleep 1
+              done
+            ) &
+          fi
+
           exec openclaw gateway run --allow-unconfigured --bind lan --auth token --token "${OPENCLAW_GATEWAY_TOKEN}"
     ports:
       - "18789:18789"
@@ -23,6 +36,8 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
+      - OPENCLAW_AUTO_APPROVE_PENDING_DEVICES=${OPENCLAW_AUTO_APPROVE_PENDING_DEVICES:-true}
+      - OPENCLAW_AUTO_APPROVE_TIMEOUT_MS=${OPENCLAW_AUTO_APPROVE_TIMEOUT_MS:-1000}
     volumes:
       - ./openclaw-data:/home/node/.openclaw
     restart: always
@@ -38,6 +53,11 @@ services:
     environment:
       - OPENCLAW_GATEWAY_URL=ws://openclaw:18789
       - OPENCLAW_IDENTITY_PATH=/app/openclaw/identity/device.json
+      - OPENCLAW_PREPAIR_ON_START=${OPENCLAW_PREPAIR_ON_START:-true}
+      - OPENCLAW_PREPAIR_STRICT=${OPENCLAW_PREPAIR_STRICT:-true}
+      - OPENCLAW_PREPAIR_MAX_WAIT_MS=${OPENCLAW_PREPAIR_MAX_WAIT_MS:-60000}
+      - OPENCLAW_PREPAIR_RETRY_DELAY_MS=${OPENCLAW_PREPAIR_RETRY_DELAY_MS:-3000}
+      - OPENCLAW_PREPAIR_CONNECT_TIMEOUT_MS=${OPENCLAW_PREPAIR_CONNECT_TIMEOUT_MS:-8000}
     volumes:
       - ./openclaw-data:/app/openclaw
     depends_on:

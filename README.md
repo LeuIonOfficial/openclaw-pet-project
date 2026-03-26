@@ -27,10 +27,19 @@ docker compose up --build
 
 ## Troubleshooting
 
-- If chat fails with OpenClaw websocket connection failed (socket-error), recreate containers after pulling latest compose changes: docker compose down && docker compose up --build
-- This project now starts OpenClaw with openclaw gateway run --bind lan, so the app container can always reach ws://openclaw:18789 on Docker networks (including Windows).
-- On startup, compose now seeds OpenClaw gateway config (mode/bind/auth token + gateway.controlUi.allowedOrigins) before running the gateway, which avoids fresh-install unhealthy starts on Windows.
-- If connection succeeds but generation still fails with 401 authentication_error, your model provider key is invalid or missing in .env.
+- If chat fails with OpenClaw websocket connection failed (socket-error), recreate containers with a clean build:
+  - `docker compose down`
+  - `docker compose up --build`
+- Gateway is started with `--bind lan`, so app container can reach `ws://openclaw:18789` on Docker networks (including Windows).
+- On startup, compose seeds OpenClaw config (mode/bind/auth token + allowed origins) before running gateway.
+- For empty `openclaw-data` runs, startup does two things before UI serves traffic:
+  - app creates/loads `openclaw-data/identity/device.json`
+  - app runs `prepair-openclaw.mjs` to wait until that device is approved
+- Auto-approval is still enabled on gateway side (`OPENCLAW_AUTO_APPROVE_PENDING_DEVICES=true`).
+- If first startup is slow on your machine, increase:
+  - `OPENCLAW_PREPAIR_MAX_WAIT_MS`
+  - `OPENCLAW_AUTO_APPROVE_TIMEOUT_MS`
+- If connection succeeds but generation fails with `401 authentication_error`, your provider key is invalid/missing.
 
 ## Module Layout
 
@@ -46,7 +55,6 @@ docker compose up --build
 ## Important Runtime Notes
 
 - OpenClaw data is mounted at `./openclaw-data`.
-- App startup runs `app/scripts/bootstrap-identity.mjs`, which ensures `openclaw-data/identity/device.json` exists (created once if missing).
 - Runtime artifacts are intentionally ignored in git (`openclaw-data/*`).
 - New agents create/update runtime folders/files automatically, for example:
   - `openclaw-data/agents/<agent-id>/sessions`
