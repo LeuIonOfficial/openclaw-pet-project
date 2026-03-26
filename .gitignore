@@ -15,8 +15,11 @@ openclaw-data/identity/
 openclaw-data/logs/
 openclaw-data/openclaw.json.bak*
 openclaw-data/update-check.json
+openclaw-data/media/
 openclaw-data/workspace/
 openclaw-data/workspace-*/
+openclaw-data/workspace-agent-*/
+docs/openclaw-runtime/
 
 # OS/editor
 .DS_Store
