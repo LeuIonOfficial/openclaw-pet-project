@@ -1,748 +1,41 @@
 "use client";
 
-import { startTransition, useEffect, useMemo, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-
-type ConnectionState = {
-  label: string;
-  tone: "neutral" | "good" | "bad";
-};
-
-type Message = {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  status: "done" | "streaming" | "error";
-};
-
-type AgentProfile = {
-  id: string;
-  name: string;
-  instructions: string;
-  createdAt: number;
-  updatedAt: number;
-};
-
-type ChatThread = {
-  id: string;
-  agentId: string;
-  sessionKey: string;
-  title: string;
-  createdAt: number;
-  updatedAt: number;
-  messages: Message[];
-};
-
-type AgentTemplate = {
-  id: string;
-  name: string;
-  instructions: string;
-};
-
-const initialConnectionState: ConnectionState = {
-  label: "Checking gateway",
-  tone: "neutral",
-};
-
-const STORAGE_THREADS_KEY = "openclaw.chat.threads.v2";
-const STORAGE_ACTIVE_THREAD_KEY = "openclaw.chat.active-thread.v2";
-const STORAGE_AGENTS_KEY = "openclaw.chat.agents.v2";
-const STORAGE_SELECTED_AGENT_KEY = "openclaw.chat.selected-agent.v2";
-
-const AGENT_TEMPLATES: AgentTemplate[] = [
-  {
-    id: "agent-general",
-    name: "General Assistant",
-    instructions:
-      "Provide clear, actionable answers. Keep responses concise unless the user asks for detail.",
-  },
-  {
-    id: "agent-travel",
-    name: "Travel Agent",
-    instructions:
-      "Act as a travel planner. Ask clarifying questions when dates, budget, or destination details are missing. Provide practical itineraries and options.",
-  },
-  {
-    id: "agent-career",
-    name: "Career Manager",
-    instructions:
-      "Act as a career coach. Give direct guidance on goals, skills, resume strategy, interview prep, and next steps.",
-  },
-];
-
-function createDefaultAgents(): AgentProfile[] {
-  const now = Date.now();
-
-  return AGENT_TEMPLATES.map((template) => ({
-    ...template,
-    createdAt: now,
-    updatedAt: now,
-  }));
-}
-
-function sortThreadsByRecent(threads: ChatThread[]): ChatThread[] {
-  return [...threads].sort((a, b) => b.updatedAt - a.updatedAt);
-}
-
-function toSessionPart(value: string): string {
-  const normalized = value.toLowerCase().replace(/[^a-z0-9_-]/g, "_");
-  return normalized.slice(0, 40) || "agent";
-}
-
-function buildSessionKey(agentId: string, threadId: string): string {
-  return `agent:${toSessionPart(agentId)}:chat:${toSessionPart(threadId)}`;
-}
-
-function createThread(agentId: string): ChatThread {
-  const now = Date.now();
-  const id = crypto.randomUUID();
-
-  return {
-    id,
-    agentId,
-    sessionKey: buildSessionKey(agentId, id),
-    title: "New chat",
-    createdAt: now,
-    updatedAt: now,
-    messages: [],
-  };
-}
-
-function deriveTitleFromMessage(value: string): string {
-  const normalized = value.replace(/\s+/g, " ").trim();
-
-  if (!normalized) {
-    return "New chat";
-  }
-
-  return normalized.length > 44 ? `${normalized.slice(0, 44)}…` : normalized;
-}
-
-function getThreadPreview(thread: ChatThread): string {
-  if (!thread.messages.length) {
-    return "No messages yet.";
-  }
-
-  const last = thread.messages[thread.messages.length - 1];
-  const normalized = last.content.replace(/\s+/g, " ").trim();
-
-  if (!normalized) {
-    return last.role === "assistant" ? "Streaming..." : "Empty message";
-  }
-
-  return normalized.length > 72 ? `${normalized.slice(0, 72)}…` : normalized;
-}
-
-function formatUpdatedAt(timestamp: number): string {
-  if (!timestamp) {
-    return "";
-  }
-
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(timestamp);
-}
-
-function mergeStreamText(previous: string, incoming: string): string {
-  if (!incoming) {
-    return previous;
-  }
-
-  if (!previous) {
-    return incoming;
-  }
-
-  // Some providers stream cumulative snapshots ("full text so far").
-  if (incoming.startsWith(previous)) {
-    return incoming;
-  }
-
-  // Ignore shorter regressions during intermittent stream hiccups.
-  if (previous.startsWith(incoming)) {
-    return previous;
-  }
-
-  // Token streams can arrive with overlapping boundaries; dedupe overlap.
-  const maxOverlap = Math.min(previous.length, incoming.length);
-
-  for (let size = maxOverlap; size > 0; size -= 1) {
-    if (previous.slice(-size) === incoming.slice(0, size)) {
-      return `${previous}${incoming.slice(size)}`;
-    }
-  }
-
-  return `${previous}${incoming}`;
-}
-
-function AssistantMarkdown({ content }: { content: string }) {
-  return (
-    <div className="text-sm leading-7 sm:text-[15px] [&_a]:text-amber-200 [&_a]:underline [&_blockquote]:mb-4 [&_blockquote]:border-l-2 [&_blockquote]:border-white/20 [&_blockquote]:pl-3 [&_code]:rounded-md [&_code]:bg-black/30 [&_code]:px-1.5 [&_code]:py-0.5 [&_ol]:mb-4 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-4 [&_p:last-child]:mb-0 [&_pre]:mb-4 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:bg-black/35 [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:mb-4 [&_ul]:list-disc [&_ul]:pl-5">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-    </div>
-  );
-}
-
-function isMessage(value: unknown): value is Message {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-
-  const item = value as Partial<Message>;
-  return (
-    typeof item.id === "string" &&
-    (item.role === "user" || item.role === "assistant") &&
-    typeof item.content === "string" &&
-    (item.status === "done" || item.status === "streaming" || item.status === "error")
-  );
-}
-
-function normalizeStoredAgents(value: unknown): AgentProfile[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  const seen = new Set<string>();
-  const normalized = value
-    .map((entry) => {
-      if (!entry || typeof entry !== "object") {
-        return null;
-      }
-
-      const agent = entry as Partial<AgentProfile>;
-
-      if (
-        typeof agent.id !== "string" ||
-        typeof agent.name !== "string" ||
-        typeof agent.instructions !== "string"
-      ) {
-        return null;
-      }
-
-      if (seen.has(agent.id)) {
-        return null;
-      }
-
-      seen.add(agent.id);
-
-      return {
-        id: agent.id,
-        name: agent.name.trim() || "Custom Agent",
-        instructions: agent.instructions.trim(),
-        createdAt: typeof agent.createdAt === "number" ? agent.createdAt : Date.now(),
-        updatedAt: typeof agent.updatedAt === "number" ? agent.updatedAt : Date.now(),
-      } as AgentProfile;
-    })
-    .filter((agent): agent is AgentProfile => agent !== null);
-
-  return normalized;
-}
-
-function normalizeStoredThreads(
-  value: unknown,
-  fallbackAgentId: string,
-  validAgentIds: Set<string>,
-): ChatThread[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  const normalized = value
-    .map((entry) => {
-      if (!entry || typeof entry !== "object") {
-        return null;
-      }
-
-      const thread = entry as Partial<ChatThread> & {
-        agentId?: unknown;
-        sessionKey?: unknown;
-      };
-
-      if (
-        typeof thread.id !== "string" ||
-        typeof thread.title !== "string" ||
-        !Array.isArray(thread.messages)
-      ) {
-        return null;
-      }
-
-      const storedAgentId =
-        typeof thread.agentId === "string" && validAgentIds.has(thread.agentId)
-          ? thread.agentId
-          : fallbackAgentId;
-      const storedSessionKey =
-        typeof thread.sessionKey === "string" && thread.sessionKey.trim()
-          ? thread.sessionKey.trim()
-          : buildSessionKey(storedAgentId, thread.id);
-
-      return {
-        id: thread.id,
-        agentId: storedAgentId,
-        sessionKey: storedSessionKey,
-        title: thread.title.trim() || "New chat",
-        createdAt: typeof thread.createdAt === "number" ? thread.createdAt : Date.now(),
-        updatedAt: typeof thread.updatedAt === "number" ? thread.updatedAt : Date.now(),
-        messages: thread.messages.filter(isMessage),
-      } as ChatThread;
-    })
-    .filter((thread): thread is ChatThread => thread !== null);
-
-  return sortThreadsByRecent(normalized);
-}
-
-function createAgent(name: string, instructions: string): AgentProfile {
-  const now = Date.now();
-
-  return {
-    id: `agent-${crypto.randomUUID()}`,
-    name,
-    instructions,
-    createdAt: now,
-    updatedAt: now,
-  };
-}
+import { AssistantMarkdown } from "@/features/chat-workspace/assistant-markdown";
+import {
+  formatUpdatedAt,
+  getThreadPreview,
+} from "@/features/chat-workspace/helpers";
+import { useChatWorkspace } from "@/features/chat-workspace/use-chat-workspace";
 
 export function ChatShell() {
-  const [agents, setAgents] = useState<AgentProfile[]>(() => createDefaultAgents());
-  const [threads, setThreads] = useState<ChatThread[]>(() => [
-    createThread(AGENT_TEMPLATES[0].id),
-  ]);
-  const [activeThreadId, setActiveThreadId] = useState<string>("");
-  const [selectedAgentId, setSelectedAgentId] = useState<string>(AGENT_TEMPLATES[0].id);
-  const [input, setInput] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [isCreatingAgent, setIsCreatingAgent] = useState(false);
-  const [newAgentName, setNewAgentName] = useState("");
-  const [newAgentInstructions, setNewAgentInstructions] = useState("");
-  const [connectionState, setConnectionState] = useState<ConnectionState>(
-    initialConnectionState,
-  );
-
-  const listRef = useRef<HTMLDivElement | null>(null);
-
-  const activeThread = useMemo(
-    () => threads.find((thread) => thread.id === activeThreadId) ?? threads[0] ?? null,
-    [activeThreadId, threads],
-  );
-  const activeAgent = useMemo(
-    () =>
-      agents.find((agent) => agent.id === (activeThread?.agentId ?? selectedAgentId)) ??
-      agents.find((agent) => agent.id === selectedAgentId) ??
-      agents[0] ??
-      null,
-    [activeThread?.agentId, agents, selectedAgentId],
-  );
-  const selectedAgent = useMemo(
-    () => agents.find((agent) => agent.id === selectedAgentId) ?? agents[0] ?? null,
-    [agents, selectedAgentId],
-  );
-  const visibleThreads = useMemo(
-    () => threads.filter((thread) => thread.agentId === selectedAgentId),
-    [selectedAgentId, threads],
-  );
-  const activeMessageCount = activeThread?.messages.length ?? 0;
-
-  useEffect(() => {
-    const defaultAgents = createDefaultAgents();
-
-    try {
-      const rawAgents = localStorage.getItem(STORAGE_AGENTS_KEY);
-      const parsedAgents = rawAgents
-        ? normalizeStoredAgents(JSON.parse(rawAgents))
-        : defaultAgents;
-      const resolvedAgents = parsedAgents.length ? parsedAgents : defaultAgents;
-
-      const validAgentIds = new Set(resolvedAgents.map((agent) => agent.id));
-      const fallbackAgentId = resolvedAgents[0].id;
-
-      const rawThreads = localStorage.getItem(STORAGE_THREADS_KEY);
-      const parsedThreads = rawThreads
-        ? normalizeStoredThreads(
-            JSON.parse(rawThreads),
-            fallbackAgentId,
-            validAgentIds,
-          )
-        : [];
-      const resolvedThreads = parsedThreads.length
-        ? parsedThreads
-        : [createThread(fallbackAgentId)];
-
-      const rawActiveThreadId = localStorage.getItem(STORAGE_ACTIVE_THREAD_KEY);
-      const rawSelectedAgentId = localStorage.getItem(STORAGE_SELECTED_AGENT_KEY);
-      const resolvedActiveThreadId =
-        rawActiveThreadId && resolvedThreads.some((thread) => thread.id === rawActiveThreadId)
-          ? rawActiveThreadId
-          : resolvedThreads[0].id;
-      const resolvedSelectedAgentId =
-        rawSelectedAgentId && validAgentIds.has(rawSelectedAgentId)
-          ? rawSelectedAgentId
-          : resolvedThreads.find((thread) => thread.id === resolvedActiveThreadId)?.agentId ??
-            fallbackAgentId;
-
-      setAgents(resolvedAgents);
-      setThreads(resolvedThreads);
-      setActiveThreadId(resolvedActiveThreadId);
-      setSelectedAgentId(resolvedSelectedAgentId);
-    } catch {
-      const fallbackThread = createThread(defaultAgents[0].id);
-      setAgents(defaultAgents);
-      setThreads([fallbackThread]);
-      setActiveThreadId(fallbackThread.id);
-      setSelectedAgentId(defaultAgents[0].id);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!activeThread && threads.length) {
-      setActiveThreadId(threads[0].id);
-    }
-  }, [activeThread, threads]);
-
-  useEffect(() => {
-    if (!selectedAgent && agents.length) {
-      setSelectedAgentId(agents[0].id);
-    }
-  }, [agents, selectedAgent]);
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_AGENTS_KEY, JSON.stringify(agents));
-  }, [agents]);
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_THREADS_KEY, JSON.stringify(threads));
-  }, [threads]);
-
-  useEffect(() => {
-    if (!activeThreadId) {
-      return;
-    }
-
-    localStorage.setItem(STORAGE_ACTIVE_THREAD_KEY, activeThreadId);
-  }, [activeThreadId]);
-
-  useEffect(() => {
-    if (!selectedAgentId) {
-      return;
-    }
-
-    localStorage.setItem(STORAGE_SELECTED_AGENT_KEY, selectedAgentId);
-  }, [selectedAgentId]);
-
-  useEffect(() => {
-    void fetch("/api/health")
-      .then(async (response) => {
-        const payload = (await response.json()) as {
-          hasToken?: boolean;
-          hasIdentity?: boolean;
-          error?: string;
-        };
-
-        if (!response.ok) {
-          throw new Error(payload.error ?? "Gateway health check failed.");
-        }
-
-        if (payload.hasToken && payload.hasIdentity) {
-          setConnectionState({
-            label: "Gateway ready",
-            tone: "good",
-          });
-          return;
-        }
-
-        setConnectionState({
-          label: "Gateway needs setup",
-          tone: "bad",
-        });
-      })
-      .catch(() => {
-        setConnectionState({
-          label: "Gateway unreachable",
-          tone: "bad",
-        });
-      });
-  }, []);
-
-  useEffect(() => {
-    const list = listRef.current;
-
-    if (!list) {
-      return;
-    }
-
-    list.scrollTo({
-      top: list.scrollHeight,
-      behavior: "smooth",
-    });
-  }, [activeThreadId, activeMessageCount]);
-
-  function updateThread(
-    threadId: string,
-    updater: (currentThread: ChatThread) => ChatThread,
-  ) {
-    setThreads((current) => {
-      const next = current.map((thread) =>
-        thread.id === threadId ? updater(thread) : thread,
-      );
-
-      return sortThreadsByRecent(next);
-    });
-  }
-
-  function createThreadForAgent(agentId: string) {
-    if (isSubmitting) {
-      return;
-    }
-
-    const next = createThread(agentId);
-
-    setThreads((current) => sortThreadsByRecent([next, ...current]));
-    setActiveThreadId(next.id);
-    setSelectedAgentId(agentId);
-    setInput("");
-    setIsSidebarOpen(false);
-  }
-
-  function handleSelectAgent(agentId: string) {
-    setSelectedAgentId(agentId);
-
-    const nextActiveThread = threads.find((thread) => thread.agentId === agentId);
-
-    if (nextActiveThread) {
-      setActiveThreadId(nextActiveThread.id);
-    }
-  }
-
-  function handleCreateAgent(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (isSubmitting) {
-      return;
-    }
-
-    const name = newAgentName.trim();
-    const instructions = newAgentInstructions.trim();
-
-    if (!name || !instructions) {
-      return;
-    }
-
-    const agent = createAgent(name, instructions);
-
-    setAgents((current) => [agent, ...current]);
-    setNewAgentName("");
-    setNewAgentInstructions("");
-    setIsCreatingAgent(false);
-    createThreadForAgent(agent.id);
-  }
-
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    const message = input.trim();
-    const targetThread = activeThread;
-
-    if (!message || isSubmitting || !targetThread) {
-      return;
-    }
-
-    const targetAgent =
-      agents.find((agent) => agent.id === targetThread.agentId) ?? selectedAgent;
-
-    if (!targetAgent) {
-      return;
-    }
-
-    const targetThreadId = targetThread.id;
-
-    const userMessage: Message = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: message,
-      status: "done",
-    };
-
-    const assistantMessageId = crypto.randomUUID();
-
-    setInput("");
-    setIsSubmitting(true);
-    setConnectionState({
-      label: "Streaming response",
-      tone: "neutral",
-    });
-
-    updateThread(targetThreadId, (thread) => ({
-      ...thread,
-      title:
-        thread.messages.length === 0
-          ? deriveTitleFromMessage(message)
-          : thread.title,
-      updatedAt: Date.now(),
-      messages: [
-        ...thread.messages,
-        userMessage,
-        {
-          id: assistantMessageId,
-          role: "assistant",
-          content: "",
-          status: "streaming",
-        },
-      ],
-    }));
-
-    try {
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          message,
-          sessionKey: targetThread.sessionKey,
-          agentName: targetAgent.name,
-          agentPrompt: targetAgent.instructions,
-        }),
-      });
-
-      if (!response.ok || !response.body) {
-        throw new Error("Chat request failed before streaming started.");
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-
-        if (done) {
-          break;
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-        const events = buffer.split("\n\n");
-        buffer = events.pop() ?? "";
-
-        for (const rawEvent of events) {
-          const line = rawEvent
-            .split("\n")
-            .find((entry) => entry.startsWith("data: "));
-
-          if (!line) {
-            continue;
-          }
-
-          const payload = JSON.parse(line.slice(6)) as
-            | { type: "status"; stage: string }
-            | { type: "delta"; text: string }
-            | { type: "final"; text: string }
-            | { type: "error"; message: string };
-
-          if (payload.type === "status") {
-            startTransition(() => {
-              setConnectionState({
-                label:
-                  payload.stage === "started"
-                    ? "Assistant is responding"
-                    : "Gateway connected",
-                tone: "good",
-              });
-            });
-            continue;
-          }
-
-          if (payload.type === "delta") {
-            startTransition(() => {
-              updateThread(targetThreadId, (thread) => ({
-                ...thread,
-                updatedAt: Date.now(),
-                messages: thread.messages.map((entry) =>
-                  entry.id === assistantMessageId
-                    ? {
-                        ...entry,
-                        content: mergeStreamText(entry.content, payload.text),
-                      }
-                    : entry,
-                ),
-              }));
-            });
-            continue;
-          }
-
-          if (payload.type === "final") {
-            startTransition(() => {
-              updateThread(targetThreadId, (thread) => ({
-                ...thread,
-                updatedAt: Date.now(),
-                messages: thread.messages.map((entry) =>
-                  entry.id === assistantMessageId
-                    ? {
-                        ...entry,
-                        content: payload.text || entry.content,
-                        status: "done",
-                      }
-                    : entry,
-                ),
-              }));
-              setConnectionState({
-                label: "Gateway ready",
-                tone: "good",
-              });
-            });
-            continue;
-          }
-
-          startTransition(() => {
-            updateThread(targetThreadId, (thread) => ({
-              ...thread,
-              updatedAt: Date.now(),
-              messages: thread.messages.map((entry) =>
-                entry.id === assistantMessageId
-                  ? {
-                      ...entry,
-                      content: payload.message,
-                      status: "error",
-                    }
-                  : entry,
-              ),
-            }));
-            setConnectionState({
-              label: "Gateway error",
-              tone: "bad",
-            });
-          });
-        }
-      }
-    } catch (error) {
-      startTransition(() => {
-        updateThread(targetThreadId, (thread) => ({
-          ...thread,
-          updatedAt: Date.now(),
-          messages: thread.messages.map((entry) =>
-            entry.id === assistantMessageId
-              ? {
-                  ...entry,
-                  content:
-                    error instanceof Error
-                      ? error.message
-                      : "Unexpected request failure.",
-                  status: "error",
-                }
-              : entry,
-          ),
-        }));
-        setConnectionState({
-          label: "Gateway error",
-          tone: "bad",
-        });
-      });
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
+  const {
+    listRef,
+    agents,
+    selectedAgent,
+    selectedAgentId,
+    activeAgent,
+    visibleThreads,
+    activeThread,
+    connectionState,
+    input,
+    inputLength,
+    isSubmitting,
+    isSidebarOpen,
+    isCreatingAgent,
+    newAgentName,
+    newAgentInstructions,
+    setSidebarOpen,
+    setInputValue,
+    setNewAgentNameValue,
+    setNewAgentInstructionsValue,
+    startCreateAgent,
+    cancelCreateAgent,
+    createThreadForSelectedAgent,
+    selectAgent,
+    selectThread,
+    handleCreateAgent,
+    handleSubmit,
+  } = useChatWorkspace();
 
   return (
     <main className="relative h-screen overflow-hidden bg-[#040714] text-slate-100">
@@ -757,7 +50,7 @@ export function ChatShell() {
           {isSidebarOpen ? (
             <button
               type="button"
-              onClick={() => setIsSidebarOpen(false)}
+              onClick={() => setSidebarOpen(false)}
               className="fixed inset-0 z-20 bg-black/45 lg:hidden"
               aria-label="Close sidebar"
             />
@@ -777,7 +70,7 @@ export function ChatShell() {
               </div>
               <button
                 type="button"
-                onClick={() => setIsSidebarOpen(false)}
+                onClick={() => setSidebarOpen(false)}
                 className="h-8 rounded-lg border border-white/15 px-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-300 lg:hidden"
               >
                 Close
@@ -786,7 +79,7 @@ export function ChatShell() {
 
             <button
               type="button"
-              onClick={() => createThreadForAgent(selectedAgent?.id ?? AGENT_TEMPLATES[0].id)}
+              onClick={createThreadForSelectedAgent}
               disabled={isSubmitting}
               className="mb-4 rounded-2xl border border-amber-300/45 bg-amber-300/90 px-4 py-3 text-left text-sm font-semibold text-slate-950 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-65"
             >
@@ -802,7 +95,7 @@ export function ChatShell() {
                 <button
                   key={agent.id}
                   type="button"
-                  onClick={() => handleSelectAgent(agent.id)}
+                  onClick={() => selectAgent(agent.id)}
                   style={{ animationDelay: `${index * 35}ms` }}
                   className={`app-enter-soft row-shift flex w-full flex-col rounded-xl border px-3 py-2.5 text-left ${
                     selectedAgentId === agent.id
@@ -827,13 +120,15 @@ export function ChatShell() {
               >
                 <input
                   value={newAgentName}
-                  onChange={(event) => setNewAgentName(event.target.value)}
+                  onChange={(event) => setNewAgentNameValue(event.target.value)}
                   placeholder="Agent name"
                   className="h-10 w-full rounded-lg border border-white/15 bg-slate-950/85 px-3 text-sm text-slate-100 outline-none focus:border-amber-300/70"
                 />
                 <textarea
                   value={newAgentInstructions}
-                  onChange={(event) => setNewAgentInstructions(event.target.value)}
+                  onChange={(event) =>
+                    setNewAgentInstructionsValue(event.target.value)
+                  }
                   placeholder="Agent instructions"
                   rows={4}
                   className="w-full resize-none rounded-lg border border-white/15 bg-slate-950/85 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-300/70"
@@ -848,11 +143,7 @@ export function ChatShell() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      setIsCreatingAgent(false);
-                      setNewAgentName("");
-                      setNewAgentInstructions("");
-                    }}
+                    onClick={cancelCreateAgent}
                     className="h-9 rounded-lg border border-white/20 px-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-200"
                   >
                     Cancel
@@ -862,7 +153,7 @@ export function ChatShell() {
             ) : (
               <button
                 type="button"
-                onClick={() => setIsCreatingAgent(true)}
+                onClick={startCreateAgent}
                 className="mb-4 h-10 rounded-xl border border-white/15 bg-white/5 px-3 text-xs font-semibold uppercase tracking-[0.16em] text-slate-200 transition hover:bg-white/10"
               >
                 + Create Agent
@@ -879,11 +170,7 @@ export function ChatShell() {
                   <button
                     key={thread.id}
                     type="button"
-                    onClick={() => {
-                      setActiveThreadId(thread.id);
-                      setSelectedAgentId(thread.agentId);
-                      setIsSidebarOpen(false);
-                    }}
+                    onClick={() => selectThread(thread)}
                     style={{ animationDelay: `${index * 28}ms` }}
                     className={`app-enter-soft row-shift flex w-full flex-col gap-1 rounded-xl border px-3 py-2.5 text-left ${
                       activeThread?.id === thread.id
@@ -915,7 +202,7 @@ export function ChatShell() {
               <div className="flex min-w-0 items-center gap-3">
                 <button
                   type="button"
-                  onClick={() => setIsSidebarOpen(true)}
+                  onClick={() => setSidebarOpen(true)}
                   className="rounded-lg border border-white/15 bg-white/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-200 transition hover:bg-white/15 lg:hidden"
                 >
                   Agents
@@ -999,14 +286,14 @@ export function ChatShell() {
               <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 sm:flex-row sm:items-end">
                 <textarea
                   value={input}
-                  onChange={(event) => setInput(event.target.value)}
+                  onChange={(event) => setInputValue(event.target.value)}
                   placeholder={`Message ${activeAgent?.name ?? "assistant"}...`}
                   rows={3}
                   className="min-h-[104px] flex-1 resize-none rounded-2xl border border-white/15 bg-slate-950/85 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-amber-300/70 focus:ring-2 focus:ring-amber-300/25"
                 />
                 <div className="flex items-center justify-between gap-2 sm:flex-col sm:items-end">
                   <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-slate-500">
-                    {input.trim().length} chars
+                    {inputLength} chars
                   </span>
                   <button
                     type="submit"
