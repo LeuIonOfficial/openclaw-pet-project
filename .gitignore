@@ -8,17 +8,8 @@
 
 # Local runtime data
 backend-data/
-openclaw-data/canvas/
-openclaw-data/agents/
-openclaw-data/devices/
-openclaw-data/identity/
-openclaw-data/logs/
-openclaw-data/openclaw.json.bak*
-openclaw-data/update-check.json
-openclaw-data/media/
-openclaw-data/workspace/
-openclaw-data/workspace-*/
-openclaw-data/workspace-agent-*/
+openclaw-data/*
+!openclaw-data/.gitkeep
 docs/openclaw-runtime/
 
 # OS/editor
