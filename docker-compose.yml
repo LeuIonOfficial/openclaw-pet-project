@@ -3,16 +3,20 @@ services:
     image: ghcr.io/openclaw/openclaw:latest
     container_name: openclaw_gateway
     command:
-      - openclaw
-      - gateway
-      - run
-      - --bind
-      - lan
-      - --allow-unconfigured
-      - --auth
-      - token
-      - --token
-      - ${OPENCLAW_GATEWAY_TOKEN}
+      - sh
+      - -lc
+      - |
+          set -e
+          if [ -z "${OPENCLAW_GATEWAY_TOKEN}" ]; then
+            echo "[openclaw-startup] OPENCLAW_GATEWAY_TOKEN is required."
+            exit 1
+          fi
+          openclaw config set gateway.mode local
+          openclaw config set gateway.bind lan
+          openclaw config set gateway.auth.mode token
+          openclaw config set gateway.auth.token "${OPENCLAW_GATEWAY_TOKEN}"
+          openclaw config set gateway.controlUi.allowedOrigins '["http://localhost:3000","http://127.0.0.1:3000","http://0.0.0.0:3000","http://host.docker.internal:3000"]' --strict-json
+          exec openclaw gateway run --allow-unconfigured --bind lan --auth token --token "${OPENCLAW_GATEWAY_TOKEN}"
     ports:
       - "18789:18789"
     environment:
