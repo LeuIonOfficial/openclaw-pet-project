@@ -2,8 +2,8 @@ import crypto from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import { logError, logInfo, logWarn } from "@/lib/logger";
-import { parseConfigDraft, type ConfigDraft } from "@/lib/schemas/config";
+import { logError, logInfo, logWarn } from "@/modules/app/logger";
+import { parseConfigDraft, type ConfigDraft } from "@/modules/app/schemas/config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

@@ -35,8 +35,8 @@ import type {
   MessageAttachment,
   ToolCallTrace,
 } from "./types";
-import { MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES } from "@/lib/schemas/chat";
-import { configDraftSchema } from "@/lib/schemas/config";
+import { MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES } from "@/modules/app/schemas/chat";
+import { configDraftSchema } from "@/modules/app/schemas/config";
 
 type AssistantMessageUpdater = (message: Message) => Message;
 
