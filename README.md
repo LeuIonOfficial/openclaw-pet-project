@@ -25,6 +25,12 @@ docker compose up --build
 4. Open:
 - [http://localhost:3000](http://localhost:3000)
 
+## Troubleshooting
+
+- If chat fails with OpenClaw websocket connection failed (socket-error), recreate containers after pulling latest compose changes: docker compose down && docker compose up --build
+- This project now starts OpenClaw with openclaw gateway run --bind lan, so the app container can always reach ws://openclaw:18789 on Docker networks (including Windows).
+- If connection succeeds but generation still fails with 401 authentication_error, your model provider key is invalid or missing in .env.
+
 ## Module Layout
 
 - App: `app/`

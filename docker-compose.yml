@@ -2,6 +2,17 @@ services:
   openclaw:
     image: ghcr.io/openclaw/openclaw:latest
     container_name: openclaw_gateway
+    command:
+      - openclaw
+      - gateway
+      - run
+      - --bind
+      - lan
+      - --allow-unconfigured
+      - --auth
+      - token
+      - --token
+      - ${OPENCLAW_GATEWAY_TOKEN}
     ports:
       - "18789:18789"
     environment:
