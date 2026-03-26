@@ -14,8 +14,10 @@ Next.js + OpenClaw gateway chat workspace with:
 cp .env.example .env
 ```
 2. Set required values in `.env`:
-- `ANTHROPIC_API_KEY`
 - `OPENCLAW_GATEWAY_TOKEN`
+- one provider key:
+  - `ANTHROPIC_API_KEY` for Claude models
+  - `OPENAI_API_KEY` for OpenAI models
 3. Start:
 ```bash
 docker compose up --build

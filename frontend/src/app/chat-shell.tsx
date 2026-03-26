@@ -93,10 +93,13 @@ function connectionVariant(
   return "default";
 }
 
-const CLAUDE_MODEL_OPTIONS = [
+const MODEL_OPTIONS = [
   "anthropic/claude-sonnet-4-5",
   "anthropic/claude-sonnet-4-6",
   "anthropic/claude-opus-4-6",
+  "openai/gpt-4.1",
+  "openai/gpt-4.1-mini",
+  "openai/gpt-4o",
 ] as const;
 
 function ToolTraceCard({ trace }: { trace: ToolCallTrace }) {
@@ -602,7 +605,7 @@ export function ChatShell() {
               disabled={isConfigSaving}
               className="min-w-[190px] bg-transparent text-[11px] text-slate-100 outline-none"
             >
-              {CLAUDE_MODEL_OPTIONS.map((modelId) => (
+              {MODEL_OPTIONS.map((modelId) => (
                 <option key={modelId} value={modelId} className="bg-slate-900">
                   {modelId}
                 </option>
