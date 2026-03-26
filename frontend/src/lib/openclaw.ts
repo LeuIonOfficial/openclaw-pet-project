@@ -484,8 +484,19 @@ async function connectAndStreamChat(
       );
     };
 
+    let connectTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const clearConnectTimeout = () => {
+      if (!connectTimeoutId) {
+        return;
+      }
+
+      clearTimeout(connectTimeoutId);
+      connectTimeoutId = null;
+    };
+
     const cleanup = () => {
-      clearTimeout(timeoutId);
+      clearConnectTimeout();
       if (patchFallbackTimer) {
         clearTimeout(patchFallbackTimer);
         patchFallbackTimer = null;
@@ -524,7 +535,7 @@ async function connectAndStreamChat(
       finish(new Error(message));
     };
 
-    const timeoutId = setTimeout(() => {
+    connectTimeoutId = setTimeout(() => {
       fail("Timed out while connecting to OpenClaw.", {
         state: "connect-timeout",
       });
@@ -696,6 +707,9 @@ async function connectAndStreamChat(
           attempt,
           resolvedSessionKey,
         });
+
+        // From this point we are connected; connect-timeout should no longer apply.
+        clearConnectTimeout();
 
         void params.onEvent({ type: "status", stage: "connected" });
 
