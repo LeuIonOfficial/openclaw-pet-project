@@ -238,13 +238,13 @@ function SidebarContent({
 
   if (isCollapsed) {
     return (
-      <div className="flex h-full min-h-0 flex-col items-center border-r border-white/10 bg-slate-950/82 px-2 py-3">
+      <div className="relative z-20 flex h-full min-h-0 flex-col items-center overflow-hidden border-r border-white/12 bg-[#2a3649] px-2.5 py-4">
         <Button
           type="button"
           variant="ghost"
           size="icon"
           onClick={onToggleCollapse}
-          className="h-9 w-9 rounded-lg border border-white/15 bg-white/5 text-slate-200 hover:bg-white/10"
+          className="h-9 w-9 rounded-lg border border-white/20 bg-white/8 text-slate-100 hover:bg-white/14"
           title="Expand sidebar"
           aria-label="Expand sidebar"
         >
@@ -256,7 +256,7 @@ function SidebarContent({
           onClick={createThreadForSelectedAgent}
           disabled={isSubmitting}
           size="icon"
-          className="mt-2 h-9 w-9 rounded-lg bg-amber-300 text-slate-950 hover:bg-amber-200"
+          className="mt-3 h-10 w-10 rounded-lg bg-amber-300 text-slate-950 hover:bg-amber-200"
           title="New chat"
           aria-label="New chat"
         >
@@ -276,10 +276,10 @@ function SidebarContent({
                   size="icon"
                   onClick={() => selectAgent(agent.id)}
                   className={cn(
-                    "h-9 w-9 rounded-lg border text-[10px] font-semibold tracking-[0.03em]",
+                    "h-10 w-10 rounded-lg border text-[11px] font-semibold tracking-[0.03em]",
                     isSelected
-                      ? "border-sky-300/45 bg-sky-300/12 text-sky-100"
-                      : "border-transparent bg-white/5 text-slate-300 hover:border-white/15 hover:bg-white/10",
+                      ? "border-sky-200/50 bg-sky-200/15 text-sky-50"
+                      : "border-transparent bg-white/8 text-slate-200 hover:border-white/20 hover:bg-white/14",
                   )}
                   title={agent.name}
                   aria-label={agent.name}
@@ -295,13 +295,13 @@ function SidebarContent({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col border-r border-white/10 bg-[#1a2433] px-3 py-3">
-      <div className="mb-3 flex items-start justify-between gap-2 border-b border-white/10 px-1 pb-3">
+    <div className="relative z-20 flex h-full min-h-0 flex-col overflow-hidden border-r border-white/12 bg-[#2a3649] px-4 py-4">
+      <div className="mb-4 flex items-start justify-between gap-3 border-b border-white/12 px-1 pb-4">
         <div className="min-w-0">
-          <p className="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-400">
+          <p className="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-300">
             OpenClaw
           </p>
-          <p className="text-sm font-semibold text-slate-100">Agent Workspace</p>
+          <p className="text-base font-semibold text-slate-50">Agent Workspace</p>
         </div>
         {onToggleCollapse ? (
           <Button
@@ -309,7 +309,7 @@ function SidebarContent({
             variant="ghost"
             size="icon"
             onClick={onToggleCollapse}
-            className="h-8 w-8 rounded-md border border-white/15 bg-white/5 text-slate-300 hover:bg-white/10"
+            className="h-8 w-8 rounded-md border border-white/20 bg-white/10 text-slate-100 hover:bg-white/16"
             title="Collapse sidebar"
             aria-label="Collapse sidebar"
           >
@@ -322,20 +322,20 @@ function SidebarContent({
         type="button"
         onClick={createThreadForSelectedAgent}
         disabled={isSubmitting}
-        className="mb-3 justify-start rounded-lg bg-amber-300 text-slate-950 hover:bg-amber-200"
+        className="mb-4 h-11 justify-start rounded-lg bg-amber-300 text-slate-950 hover:bg-amber-200"
       >
         <Plus className="mr-2 h-4 w-4" />
         New Chat
       </Button>
 
       <ScrollArea className="min-h-0 flex-1 pr-1">
-        <div className="space-y-3 pb-2 pr-1">
+        <div className="space-y-4 pb-3 pr-1.5">
           <div className="px-1">
-            <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-slate-500">
+            <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-slate-300/85">
               Thread Tree
             </p>
           </div>
-          <div className="space-y-0.5">
+          <div className="space-y-1">
             {agents.map((agent, index) => {
               const isSelected = selectedAgentId === agent.id;
 
@@ -350,10 +350,10 @@ function SidebarContent({
                     variant="ghost"
                     onClick={() => selectAgent(agent.id)}
                     className={cn(
-                      "h-9 w-full justify-start rounded-md border px-2.5 text-left text-xs",
+                      "h-10 w-full justify-start rounded-md border px-3 text-left text-[13px]",
                       isSelected
-                        ? "border-white/20 bg-white/10 text-slate-100"
-                        : "border-transparent bg-transparent text-slate-300 hover:border-white/10 hover:bg-white/6",
+                        ? "border-white/25 bg-white/12 text-slate-50"
+                        : "border-transparent bg-transparent text-slate-200 hover:border-white/15 hover:bg-white/8",
                     )}
                   >
                     {isSelected ? (
@@ -370,7 +370,7 @@ function SidebarContent({
                   </Button>
 
                   {isSelected ? (
-                    <div className="ml-4 mt-1 space-y-0.5 border-l border-white/12 pl-2">
+                    <div className="ml-5 mt-1.5 space-y-1 border-l border-white/15 pl-3">
                       {visibleThreads.length ? (
                         visibleThreads.map((thread) => (
                           <Button
@@ -379,21 +379,21 @@ function SidebarContent({
                             variant="ghost"
                             onClick={() => selectThread(thread)}
                             className={cn(
-                              "h-auto w-full items-start justify-start gap-2 rounded-md px-2 py-1.5 text-left",
+                              "h-auto w-full items-start justify-start gap-2 rounded-md px-2.5 py-2 text-left",
                               activeThread?.id === thread.id
-                                ? "bg-slate-100/8 text-slate-100"
-                                : "text-slate-400 hover:bg-white/6 hover:text-slate-200",
+                                ? "bg-slate-100/10 text-slate-100"
+                                : "text-slate-300 hover:bg-white/8 hover:text-slate-100",
                             )}
                           >
                             <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                             <span className="min-w-0 space-y-0.5">
-                              <span className="block truncate text-xs font-medium leading-5">
+                              <span className="block truncate text-[12px] font-medium leading-5">
                                 {thread.title}
                               </span>
-                              <span className="block truncate text-[10px] text-slate-500">
+                              <span className="block truncate text-[10px] text-slate-400">
                                 {getThreadPreview(thread)}
                               </span>
-                              <span className="block text-[9px] uppercase tracking-[0.14em] text-slate-500">
+                              <span className="block text-[9px] uppercase tracking-[0.14em] text-slate-400">
                                 {formatUpdatedAt(thread.updatedAt)}
                               </span>
                             </span>
@@ -411,17 +411,17 @@ function SidebarContent({
             })}
           </div>
 
-          <div className="border-t border-white/10 pt-2">
+          <div className="border-t border-white/12 pt-3">
             {isCreatingAgent ? (
               <form
                 onSubmit={handleCreateAgent}
-                className="space-y-2 rounded-lg border border-white/15 bg-white/5 p-2.5"
+                className="space-y-2.5 rounded-lg border border-white/15 bg-white/7 p-3"
               >
                 <Input
                   value={newAgentName}
                   onChange={(event) => setNewAgentNameValue(event.target.value)}
                   placeholder="Agent name"
-                  className="h-9"
+                  className="h-10"
                 />
                 <Textarea
                   value={newAgentInstructions}
@@ -430,7 +430,7 @@ function SidebarContent({
                   }
                   placeholder="Agent instructions"
                   rows={3}
-                  className="min-h-[90px] resize-none rounded-lg px-3 py-2"
+                  className="min-h-[98px] resize-none rounded-lg px-3 py-2"
                 />
                 <div className="flex gap-2">
                   <Button
@@ -455,7 +455,7 @@ function SidebarContent({
                 type="button"
                 variant="ghost"
                 onClick={startCreateAgent}
-                className="h-8 w-full justify-start rounded-md text-[11px] uppercase tracking-[0.16em] text-slate-300 hover:bg-white/8"
+                className="h-9 w-full justify-start rounded-md text-[12px] uppercase tracking-[0.15em] text-slate-200 hover:bg-white/10"
               >
                 <Plus className="h-3.5 w-3.5" />
                 New Agent Folder
@@ -465,9 +465,9 @@ function SidebarContent({
         </div>
       </ScrollArea>
 
-      <Card className="mt-3 border-white/12 bg-white/5">
+      <Card className="mt-4 border-white/15 bg-white/10">
         <CardHeader className="pb-2">
-          <CardTitle className="font-mono text-[9px] uppercase tracking-[0.18em] text-slate-400">
+          <CardTitle className="font-mono text-[9px] uppercase tracking-[0.18em] text-slate-300">
             Gateway Config
           </CardTitle>
         </CardHeader>
@@ -535,20 +535,10 @@ export function ChatShell() {
     handleAttachmentFiles,
     handleSubmit,
   } = controller;
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
-    if (typeof window === "undefined") {
-      return false;
-    }
-
-    return localStorage.getItem("openclaw.sidebar.collapsed") === "1";
-  });
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   const toggleSidebarCollapsed = useCallback(() => {
-    setIsSidebarCollapsed((current) => {
-      const next = !current;
-      localStorage.setItem("openclaw.sidebar.collapsed", next ? "1" : "0");
-      return next;
-    });
+    setIsSidebarCollapsed((current) => !current);
   }, []);
 
   const onDrop = useCallback(
@@ -586,11 +576,11 @@ export function ChatShell() {
       <div className="relative mx-auto h-full w-full max-w-[1680px] p-2 sm:p-4">
         <div
           className={cn(
-            "app-enter grid h-full min-h-0 overflow-hidden rounded-[28px] border border-white/10 bg-slate-950/72 shadow-[0_28px_90px_rgba(2,6,23,0.58)] lg:grid-cols-[320px_minmax(0,1fr)]",
-            isSidebarCollapsed && "lg:grid-cols-[74px_minmax(0,1fr)]",
+            "app-enter isolate grid h-full min-h-0 overflow-hidden rounded-[28px] border border-white/10 bg-slate-950/72 shadow-[0_28px_90px_rgba(2,6,23,0.58)] lg:grid-cols-[360px_minmax(0,1fr)]",
+            isSidebarCollapsed && "lg:grid-cols-[82px_minmax(0,1fr)]",
           )}
         >
-          <aside className="hidden min-h-0 lg:flex">
+          <aside className="hidden min-h-0 lg:relative lg:z-20 lg:flex">
             <SidebarContent
               controller={controller}
               isCollapsed={isSidebarCollapsed}
@@ -608,7 +598,7 @@ export function ChatShell() {
             </SheetContent>
           </Sheet>
 
-          <section className="relative flex min-h-0 min-w-0 flex-col">
+          <section className="relative z-0 flex min-h-0 min-w-0 flex-col border-l border-white/8">
             <header className="app-enter-soft flex items-center justify-between gap-3 border-b border-white/10 px-3 py-3 sm:px-6 sm:py-4">
               <div className="flex min-w-0 items-center gap-3">
                 <Button
